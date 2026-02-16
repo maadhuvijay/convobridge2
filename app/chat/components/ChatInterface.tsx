@@ -37,61 +37,46 @@ export function ChatInterface() {
     setResponses([]); // Clear previous responses
     
     try {
-      // In a real scenario, this would call the Python Backend
-      // const res = await fetch('http://localhost:8000/api/start_conversation', { ... })
-      
-      // Simulating API delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Mock Response based on topic
-      let mockQuestion = "";
-      let mockResponses = [];
-      let mockVocab = { word: "", type: "", definition: "", example: "" };
+      // Call the Python Backend API
+      const res = await fetch('http://localhost:8000/api/start_conversation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          topic: topicId,
+          user_id: userName,
+          difficulty_level: 1
+        })
+      });
 
-      switch(topicId) {
-        case 'gaming':
-          mockQuestion = "What kind of video games do you enjoy playing the most?";
-          mockResponses = [
-            "I really like adventure games because I can explore.",
-            "I prefer racing games because they are fast.",
-            "I enjoy puzzle games that make me think."
-          ];
-          mockVocab = { 
-            word: "Adventure", 
-            type: "noun", 
-            definition: "An unusual and exciting, typically hazardous, experience or activity.", 
-            example: "The hero went on a grand adventure." 
-          };
-          break;
-        case 'food':
-          mockQuestion = "If you could eat only one meal for the rest of your life, what would it be?";
-          mockResponses = [
-            "I would choose pizza because it has many toppings.",
-            "I love pasta, so I would pick spaghetti.",
-            "Definitely sushi, it's my favorite."
-          ];
-          mockVocab = {
-             word: "Cuisine",
-             type: "noun",
-             definition: "A style or method of cooking, especially as characteristic of a particular country.",
-             example: "Italian cuisine is famous for its pasta."
-          };
-          break;
-        default:
-          mockQuestion = `Let's talk about ${topicId}. What do you think about it?`;
-          mockResponses = ["It's interesting.", "I don't know much about it.", "Tell me more."];
-          mockVocab = { word: "Topic", type: "noun", definition: "A matter dealt with in a text, discourse, or conversation.", example: "That is an interesting topic." };
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
       }
 
-      setQuestion(mockQuestion);
-      setResponses(mockResponses);
-      setVocab(mockVocab);
+      const data = await res.json();
+      
+      setQuestion(data.question);
+      setResponses(data.response_options || []);
+      
+      // For now, use a default vocab until vocabulary agent is implemented
+      setVocab({ 
+        word: "Topic", 
+        type: "noun", 
+        definition: "A matter dealt with in a text, discourse, or conversation.", 
+        example: "That is an interesting topic." 
+      });
+      
       // Reset welcome message state when a topic is selected so we only show the question
       setWelcomeMessage({ line1: "", line2: "" });
 
     } catch (error) {
       console.error("Failed to fetch conversation", error);
-      setQuestion("Connection error. Please try again.");
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : "Unknown error occurred";
+      setQuestion(`Connection error: ${errorMessage}. Please make sure the backend server is running on port 8000.`);
+      setResponses([]);
     } finally {
       setIsLoading(false);
     }

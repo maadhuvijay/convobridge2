@@ -1,36 +1,142 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ConvoBridge
 
-## Getting Started
+**ConvoBridge** is a conversation practice platform designed to help autistic youth build confidence in social interactions through structured, AI-powered conversation sessions.
 
-First, run the development server:
+## 🎯 Overview
 
+ConvoBridge uses a multi-agent AI system to generate contextually appropriate conversation questions based on selected topics. The platform focuses on the "basic preferences" dimension, helping users practice expressing likes, dislikes, favorites, and simple choices in a safe, structured environment.
+
+## ✨ Features
+
+- **Topic-Based Conversations**: Select from predefined topics (Gaming, Food, Hobbies, Weekend Plans, YouTube)
+- **AI-Generated Questions**: Dynamic question generation using OpenAI GPT-4o
+- **Multi-Agent Architecture**: Coordinated team of specialized AI agents
+- **Structured Responses**: Pre-generated response options to guide users
+- **Modern UI**: Cyberpunk-themed interface with smooth animations
+- **Vocabulary Learning**: Integrated vocabulary feature (in development)
+
+## 🏗️ Architecture
+
+ConvoBridge uses a **multi-agent system** built with Agno Teams:
+
+- **Orchestrator Team**: Coordinates and delegates tasks to specialized sub-agents
+- **Conversation Agent**: Generates questions focused on basic preferences
+- **Future Agents**: Response Agent, Vocabulary Agent (planned)
+
+For detailed architecture documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.8+
+- OpenAI API Key
+
+### Frontend Setup
+
+1. Install dependencies:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Start development server:
+```bash
+npm run dev
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Open [http://localhost:3000](http://localhost:3000)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Backend Setup
 
-## Learn More
+1. Navigate to backend directory:
+```bash
+cd backend
+```
 
-To learn more about Next.js, take a look at the following resources:
+2. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+3. Create `.env` file:
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+4. Start the backend server:
+```bash
+python main.py
+```
 
-## Deploy on Vercel
+The backend will run on `http://localhost:8000`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📁 Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+convobridge2/
+├── app/                    # Next.js frontend
+│   ├── chat/              # Chat interface
+│   └── components/        # Shared components
+├── backend/               # Python backend
+│   ├── main.py           # FastAPI application
+│   ├── orchestrator_agent.py  # Orchestrator team
+│   └── subagents/        # Sub-agent modules
+└── ARCHITECTURE.md       # Detailed architecture docs
+```
+
+## 🛠️ Technology Stack
+
+**Frontend:**
+- Next.js 16.1.6 (App Router)
+- TypeScript 5
+- Tailwind CSS 4
+- React 19.2.3
+
+**Backend:**
+- FastAPI
+- Agno 2.5.2 (AI framework)
+- OpenAI GPT-4o
+- Uvicorn
+
+## 📚 Documentation
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Comprehensive technical documentation
+  - System architecture
+  - Agent system design
+  - API documentation
+  - Development workflow
+
+## 🧪 Testing Agents
+
+### Test Orchestrator Team
+```bash
+cd backend
+python orchestrator_agent.py
+```
+
+### Test Conversation Agent
+```bash
+cd backend
+python subagents/conversation_agent.py
+```
+
+## 🔮 Future Enhancements
+
+- Response Agent for dynamic response generation
+- Vocabulary Agent for word learning
+- User authentication and progress tracking
+- Additional conversation dimensions
+- Difficulty adjustment system
+
+## 📝 License
+
+[Add license information here]
+
+## 🤝 Contributing
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for development guidelines and architecture details.
+
+---
+
+**Built with ❤️ for helping autistic youth build conversation confidence**
