@@ -44,7 +44,7 @@ export default function LoginPage() {
                 <div className="relative z-10 flex flex-col items-center gap-8">
                     
                     <h2 className="text-3xl font-bold uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 drop-shadow-sm font-mono text-center">
-                        Identity Check
+                        Access Terminal
                     </h2>
                     
                     <form onSubmit={handleStartChat} className="w-full flex flex-col gap-8">
@@ -53,7 +53,7 @@ export default function LoginPage() {
                         <div className="flex flex-col gap-3">
                             <label htmlFor="name" className="text-copper font-medium tracking-wide uppercase text-sm flex items-center gap-2">
                                 <User className="w-4 h-4" />
-                                Agent Name
+                                User Name
                             </label>
                             
                             <div className="relative group/input">
