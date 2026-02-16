@@ -15,7 +15,11 @@ export function ChatInterface() {
   const userName = 'USER'; // Static for now until context/storage is implemented
 
   const [currentTopic, setCurrentTopic] = useState<string | null>(null);
-  const [question, setQuestion] = useState("Select a topic to begin the mission.");
+  const [question, setQuestion] = useState(""); // Question is managed dynamically
+  const [welcomeMessage, setWelcomeMessage] = useState({
+    line1: `Hi ${userName}! Welcome to ConvoBridge!`,
+    line2: "Select a topic to begin the mission."
+  });
   const [responses, setResponses] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -82,6 +86,8 @@ export function ChatInterface() {
       setQuestion(mockQuestion);
       setResponses(mockResponses);
       setVocab(mockVocab);
+      // Reset welcome message state when a topic is selected so we only show the question
+      setWelcomeMessage({ line1: "", line2: "" });
 
     } catch (error) {
       console.error("Failed to fetch conversation", error);
@@ -171,7 +177,7 @@ export function ChatInterface() {
              
              <div className="relative z-10 p-6 rounded-2xl rounded-tl-none bg-black/60 backdrop-blur-xl border border-cyan/30 shadow-[0_0_30px_rgba(0,229,255,0.15)] flex flex-col gap-3 min-h-[150px]">
                 <div className="flex justify-between items-start">
-                    <span className="text-cyan font-mono text-xs tracking-widest uppercase mb-2">Agent Query</span>
+                    <span className="text-cyan font-mono text-xs tracking-widest uppercase mb-2">Agent Message</span>
                     <button className="p-1.5 rounded-full hover:bg-white/10 text-cyan transition-colors">
                       <Volume2 className="w-4 h-4" />
                     </button>
@@ -185,9 +191,19 @@ export function ChatInterface() {
                     <span className="font-mono text-sm uppercase">Processing Input...</span>
                   </div>
                 ) : (
-                  <p className="text-lg md:text-xl text-white font-light leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    "{question}"
-                  </p>
+                  <div className="text-lg md:text-xl text-white font-light leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    {welcomeMessage.line1 ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                           <span>{welcomeMessage.line1}</span>
+                           <Activity className="w-5 h-5 text-cyan animate-pulse" />
+                        </div>
+                        <span className="text-gray-300 text-base">{welcomeMessage.line2}</span>
+                      </div>
+                    ) : (
+                      `"${question}"`
+                    )}
+                  </div>
                 )}
              </div>
           </div>
