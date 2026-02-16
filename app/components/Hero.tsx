@@ -1,4 +1,4 @@
-import { Bot, MessageSquare, Sparkles } from 'lucide-react';
+import { Bot, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
 export function Hero() {
@@ -18,49 +18,27 @@ export function Hero() {
       </div>
       
       {/* Subtext */}
-      <p className="text-lg md:text-2xl text-gray-300 mb-12 max-w-3xl font-light tracking-wide leading-relaxed drop-shadow-md flex flex-col md:flex-row md:gap-8 items-center justify-center">
+      <p className="text-lg md:text-2xl text-gray-300 mb-12 max-w-3xl font-light tracking-wide leading-relaxed drop-shadow-md">
         <span className="text-copper font-medium">Practice real conversations.</span>
         <span className="text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]">Build confidence.</span>
         <span className="text-cyan font-bold drop-shadow-[0_0_10px_rgba(0,229,255,0.8)] animate-pulse">Find your voice.</span>
       </p>
       
-      {/* Robot & CTA Section */}
-      <div className="flex flex-col md:flex-row items-center gap-10 md:gap-16 mt-4">
-        
-        {/* Robot Image Container (Holographic Card) */}
-        <div className="relative w-56 h-56 md:w-72 md:h-72 rounded-2xl bg-black/40 backdrop-blur-xl border border-copper/40 flex items-center justify-center shadow-[0_0_40px_rgba(255,107,53,0.2)] group hover:border-cyan hover:shadow-[0_0_50px_rgba(0,229,255,0.3)] transition-all duration-500">
-           
-           {/* Inner Grid/Tech Pattern */}
-           <div className="absolute inset-2 border border-white/5 rounded-xl bg-[radial-gradient(circle_at_center,_rgba(255,107,53,0.1)_0%,_transparent_70%)]"></div>
-           
-           {/* Scanline Overlay */}
-           <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,11,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-0 bg-[length:100%_4px,6px_100%] pointer-events-none rounded-2xl"></div>
+      {/* Robot Image Container (Holographic Card) - Centered */}
+      <div className="relative w-64 h-64 md:w-80 md:h-80 rounded-2xl bg-black/40 backdrop-blur-xl border border-copper/40 flex items-center justify-center shadow-[0_0_40px_rgba(255,107,53,0.2)] group hover:border-cyan hover:shadow-[0_0_50px_rgba(0,229,255,0.3)] transition-all duration-500 mt-4">
+          
+          {/* Inner Grid/Tech Pattern */}
+          <div className="absolute inset-2 border border-white/5 rounded-xl bg-[radial-gradient(circle_at_center,_rgba(255,107,53,0.1)_0%,_transparent_70%)]"></div>
+          
+          {/* Scanline Overlay */}
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,11,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-0 bg-[length:100%_4px,6px_100%] pointer-events-none rounded-2xl"></div>
 
-           <Bot className="relative z-10 w-32 h-32 md:w-40 md:h-40 text-copper group-hover:text-cyan drop-shadow-[0_0_20px_rgba(255,107,53,0.6)] group-hover:drop-shadow-[0_0_30px_rgba(0,229,255,0.6)] transition-all duration-500 animate-float" />
-           
-           {/* Floating Particle/Sparkle */}
-           <Sparkles className="absolute top-4 right-4 w-6 h-6 text-cyan/70 animate-pulse" />
-        </div>
-        
-        {/* Let's Chat Button */}
-        <Link 
-          href="/chat"
-          className="group relative px-10 py-5 bg-black/80 border-2 border-copper text-white text-xl md:text-2xl font-bold rounded-xl overflow-hidden transition-all duration-300 hover:scale-105 hover:shadow-[0_0_40px_rgba(255,107,53,0.5)] hover:border-cyan"
-        >
-          {/* Button Background Glow */}
-          <div className="absolute inset-0 bg-copper/10 group-hover:bg-cyan/10 transition-colors duration-300"></div>
+          <Bot className="relative z-10 w-32 h-32 md:w-48 md:h-48 text-copper group-hover:text-cyan drop-shadow-[0_0_20px_rgba(255,107,53,0.6)] group-hover:drop-shadow-[0_0_30px_rgba(0,229,255,0.6)] transition-all duration-500 animate-float" />
           
-          <span className="relative z-10 flex items-center gap-4 uppercase tracking-widest text-shadow-sm group-hover:text-cyan transition-colors">
-            Let's Chat
-            <MessageSquare className="w-6 h-6 group-hover:rotate-12 group-hover:text-cyan transition-transform duration-300" />
-          </span>
-          
-          {/* Decorative Corner Accents */}
-          <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-white/50"></div>
-          <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-white/50"></div>
-        </Link>
-        
+          {/* Floating Particle/Sparkle */}
+          <Sparkles className="absolute top-4 right-4 w-6 h-6 text-cyan/70 animate-pulse" />
       </div>
+        
     </div>
   );
 }
