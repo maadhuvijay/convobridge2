@@ -6,9 +6,11 @@ with autistic youth in a safe and structured environment.
 
 from agno.team import Team
 from agno.models.openai import OpenAIChat
+from agno.tools.reasoning import ReasoningTools
 from subagents.conversation_agent import create_conversation_agent
 from subagents.response_generate_agent import create_response_agent
 from subagents.vocabulary_agent import create_vocabulary_agent
+from subagents.speech_analysis_agent import create_speech_analysis_agent
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -42,15 +44,31 @@ def create_orchestrator_agent():
     conversation_agent = create_conversation_agent()
     response_agent = create_response_agent()
     vocabulary_agent = create_vocabulary_agent()
+    speech_analysis_agent = create_speech_analysis_agent()
     
-    # Create the orchestrator team
+    # Create the orchestrator team with reasoning tools
     team = Team(
         name="ConvoBridge Orchestrator",
         model=OpenAIChat(id="gpt-4o-mini"),
         description="A helpful team for coordinating conversation practice sessions with teens.",
-        members=[conversation_agent, response_agent, vocabulary_agent],
+        members=[conversation_agent, response_agent, vocabulary_agent, speech_analysis_agent],
+        tools=[
+            ReasoningTools(
+                enable_think=True,
+                enable_analyze=True,
+                add_instructions=True,
+                add_few_shot=True,
+            )
+        ],
         instructions=[
-            "You are a friendly and supportive team leader.",
+            "You are a friendly and supportive team leader with strong reasoning capabilities.",
+            "Use reasoning tools (think and analyze) when you need to:",
+            "  - Break down complex coordination tasks into steps",
+            "  - Decide which sub-agent to delegate to and when",
+            "  - Reflect on the quality of responses from sub-agents",
+            "  - Adjust your approach based on the conversation context",
+            "  - Consider multiple perspectives before making decisions",
+            "",
             "Help coordinate conversation practice sessions.",
             "When a topic is chosen, delegate to the Conversation Agent to generate an appropriate question.",
             "The Conversation Agent focuses on 'basic preferences' - likes, dislikes, favorites, and simple choices.",
@@ -66,6 +84,18 @@ def create_orchestrator_agent():
             "The Vocabulary Agent is available to generate vocabulary words based on questions.",
             "It identifies key vocabulary words that are relevant to the question and topic being discussed.",
             "The Vocabulary Agent helps users learn new words relevant to their conversations.",
+            "",
+            "The Speech Analysis Agent is available to analyze speech responses from teens.",
+            "It transcribes speech, analyzes the transcript for clarity and coherence,",
+            "provides a speech clarity score (0-100), and gives encouraging feedback to help teens improve.",
+            "The Speech Analysis Agent focuses on positive reinforcement and building confidence.",
+            "",
+            "When coordinating, think through your decisions step by step:",
+            "  1. Understand the task and context",
+            "  2. Identify which sub-agent(s) are needed",
+            "  3. Consider the best approach for delegation",
+            "  4. Analyze the results and ensure quality",
+            "  5. Adjust if needed based on the response quality",
         ],
         markdown=True,
     )

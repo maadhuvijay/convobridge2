@@ -3,15 +3,16 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bot, User, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export function ChatNavbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
   
-  // Static user name for now
-  const userName = 'USER';
+  // Get username from query parameters
+  const userName = searchParams.get('user') || 'USER';
 
   const handleLogout = () => {
     router.push('/');

@@ -9,11 +9,34 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const router = useRouter();
 
-  const handleStartChat = (e: React.FormEvent) => {
+  const handleStartChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim()) {
-      // Pass the name via query parameter
-      router.push(`/chat?user=${encodeURIComponent(name)}`);
+      try {
+        // Send login request to backend with username and timestamp
+        const loginRes = await fetch('http://localhost:8000/api/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: name.trim()
+          })
+        });
+
+        if (!loginRes.ok) {
+          throw new Error(`Login failed: ${loginRes.status}`);
+        }
+
+        const loginData = await loginRes.json();
+        
+        // Pass the username via query parameter
+        router.push(`/chat?user=${encodeURIComponent(name.trim())}&userId=${encodeURIComponent(loginData.user_id)}`);
+      } catch (error) {
+        console.error("Login error:", error);
+        // Still navigate to chat even if login fails (for development)
+        router.push(`/chat?user=${encodeURIComponent(name.trim())}`);
+      }
     }
   };
 

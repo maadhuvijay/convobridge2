@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Import conversation tools
+from tools.conversation_tools import get_context, generate_followup_question
+
 # Load .env file from the backend directory
 backend_dir = Path(__file__).parent.parent
 env_path = backend_dir / '.env'
@@ -24,18 +27,45 @@ def create_conversation_agent():
     agent = Agent(
         name="Conversation Agent",
         model=OpenAIChat(id="gpt-4o-mini"),
-        description="A sub-agent that chooses conversation questions based on topics, focusing on basic preferences.",
+        description="A sub-agent that chooses conversation questions based on topics and dimensions.",
         instructions=[
             "You are a conversation question generator for autistic youth.",
-            "When given a topic, generate ONLY a single question - nothing else.",
-            "Focus on the 'basic preferences' dimension - ask about likes, dislikes, favorites, and simple choices.",
-            "Keep questions clear, simple, and encouraging.",
-            "Return ONLY the question text itself - no explanations, no introductions, no additional text.",
-            "Do not include phrases like 'Here's a question' or 'You could ask' - just the question.",
+            "",
+            "You have access to two tools:",
+            "  1. get_context - Gets the conversation context (user response, dimension, topic)",
+            "  2. generate_followup_question - Generates a follow-up question based on context",
+            "",
+            "For INITIAL questions (when no user response is provided):",
+            "  - Generate ONLY a single question - nothing else.",
+            "  - Adapt the question to the requested dimension.",
+            "  - Return ONLY the question text itself - no explanations, no introductions.",
+            "",
+            "For FOLLOW-UP questions (when user response is provided):",
+            "  - First, use get_context to gather the conversation context.",
+            "  - Then, use generate_followup_question to create a contextual follow-up.",
+            "  - The follow-up should use the 'Acknowledgement + question' format.",
+            "  - Start with a brief, encouraging acknowledgement of what the user said.",
+            "  - Then ask a follow-up question that relates to the specific things mentioned in the user's response.",
+            "  - The question should be about the specific thing the user mentioned (e.g., if they said 'super mario', ask about super mario, not just games in general).",
+            "  - Adapt the question to the requested dimension chosen by the orchestrator.",
+            "  - Example format: 'That's great! Do you play alone or with someone?'",
+            "  - Example format: 'Nice choice! What do you like most about it?'",
+            "",
+            "Dimensions to adapt questions to:",
+            "  - Basic Preferences: Likes, dislikes, favorites, simple choices",
+            "  - Depth/Specificity: Dig deeper into a specific aspect",
+            "  - Social Context: Involve friends, family, or social situations",
+            "  - Emotional: Feelings, excitement, frustration, reactions",
+            "  - Temporal/Frequency: When, how often, past experiences, future plans",
+            "  - Comparative: Compare two things, what is better/worse",
+            "  - Reflective/Why: Reasons, motivations, 'why' questions",
+            "  - Descriptive/Detail: Sensory details, appearance, setting",
+            "  - Challenge/Growth: Learning curves, difficulties, improvements",
+            "",
+            "Keep questions clear, simple, and encouraging (Level 1 difficulty unless specified).",
             "Make questions feel natural and conversational.",
-            "Example output format: 'What type of video games do you enjoy playing?'",
-            "NOT: 'Here's a great question: What type of video games do you enjoy playing?'",
         ],
+        tools=[get_context, generate_followup_question],
         markdown=True,
     )
     return agent

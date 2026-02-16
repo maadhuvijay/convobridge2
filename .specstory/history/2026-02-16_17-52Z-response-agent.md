@@ -1672,3 +1672,179 @@ All references now point to `response_generate_agent.py`, and there are no linti
 
 ---
 
+_**User (2026-02-16 02:57Z)**_
+
+In the response options, let's remove the mic icon. 
+
+---
+
+_**Agent (model default, mode Agent)**_
+
+
+
+---
+
+
+Searching the frontend for where the response options and mic icon are rendered:
+
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="codebase_search">
+<details>
+                <summary>Tool use: **codebase_search** • Searched codebase "Where are response options displayed with microphone icons in the frontend?" • **6** results</summary>
+            
+| File | Lines |
+|------|-------|
+| `app/chat/components/ChatInterface.tsx` | L5-293 |
+| `app/chat/components/ChatInterface.tsx` | L293 |
+| `backend/main.py` | L28-51 |
+| `backend/main.py` | L21-28 |
+| `app/components/Hero.tsx` | L2-52 |
+| `app/components/Hero.tsx` | L52 |
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "mic|microphone|Mic" in "c:\dev\convobridge2" • 14 matches</summary>
+
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\app\chat\components\ChatInterface.tsx` | `import \{ Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi \} from 'lucide-react';` | L3 |
+| `.\app\chat\components\ChatInterface.tsx` | `const [question, setQuestion] = useState(""); // Question is managed dynamically` | L18 |
+| `.\app\chat\components\ChatInterface.tsx` | `<Mic className="w-5 h-5" />` | L259 |
+| `.\README.md` | `- **AI-Generated Questions**: Dynamic question generation using OpenAI GPT-4o` | L12 |
+| `.\README.md` | `- Response Agent for dynamic response generation` | L126 |
+| `.\ARCHITECTURE.md` | `- **AI-Generated Questions**: Dynamic question generation focused on "basic preferences" dimension` | L23 |
+| `.\ARCHITECTURE.md` | `- Generate multiple response options dynamically` | L499 |
+| `.\package-lock.json` | `"micromatch": "^4.0.4"` | L3466 |
+| `.\package-lock.json` | `"integrity": "sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==",` | L3538 |
+| `.\package-lock.json` | `"node_modules/micromatch": \{` | L4876 |
+| `.\package-lock.json` | `"resolved": "https://registry.npmjs.org/micromatch/-/micromatch-4.0.8.tgz",` | L4878 |
+| `.\package-lock.json` | `"node_modules/queue-microtask": \{` | L5370 |
+| `.\package-lock.json` | `"resolved": "https://registry.npmjs.org/queue-microtask/-/queue-microtask-1.2.3.tgz",` | L5372 |
+| `.\package-lock.json` | `"queue-microtask": "^1.2.2"` | L5536 |
+
+
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Reading the ChatInterface file to see how the mic icon is used:
+
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: c:\dev\convobridge2\app\chat\components\ChatInterface.tsx</summary>
+
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Removing the mic icon button from the response options:
+
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: c:\dev\convobridge2\app\chat\components\ChatInterface.tsx</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: 1
+
+```diff
+@@ -1,5 +1,5 @@
+  'use client';
+  
+- import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi } from 'lucide-react';
++ import { Bot, Volume2, BookOpen, Activity, Signal, Wifi } from 'lucide-react';
+  import { useState } from 'react';
+  
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: c:\dev\convobridge2\app\chat\components\ChatInterface.tsx</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: 4
+
+```diff
+@@ -254,9 +254,6 @@
+              ) : responses.length &gt; 0 ? (
+                 responses.map((res, i) =&gt; (
+-                 &lt;div key={i} className="group relative p-4 rounded-xl bg-white/5 border border-white/10 hover:border-copper hover:bg-copper/5 transition-all duration-300 flex items-center justify-between cursor-pointer animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: &#96;${i * 100}ms&#96; }}&gt;
++                 &lt;div key={i} className="group relative p-4 rounded-xl bg-white/5 border border-white/10 hover:border-copper hover:bg-copper/5 transition-all duration-300 flex items-center cursor-pointer animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: &#96;${i * 100}ms&#96; }}&gt;
+                      &lt;span className="text-gray-300 group-hover:text-white text-base"&gt;{res}&lt;/span&gt;
+-                     &lt;button className="flex-shrink-0 w-10 h-10 rounded-full bg-black/50 border border-white/20 flex items-center justify-center text-gray-400 group-hover:border-cyan group-hover:text-cyan group-hover:shadow-[0_0_10px_rgba(0,229,255,0.4)] transition-all"&gt;
+-                         &lt;Mic className="w-5 h-5" /&gt;
+-                     &lt;/button&gt;
+                  &lt;/div&gt;
+                 ))
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="generic" data-tool-name="read_lints">
+<details>
+          <summary>Tool use: **read_lints** • Read lints for 1 file</summary>
+      
+Lint paths:
+
+- `c:\dev\convobridge2\app\chat\components\ChatInterface.tsx`
+
+Lint results
+
+
+**No lint errors found**
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Removed the mic icon from the response options:
+
+1. **Removed the `Mic` import** from lucide-react (no longer needed)
+2. **Removed the button element** containing the mic icon
+3. **Updated the layout** — removed `justify-between` since there's no icon on the right
+
+Response options now display as text-only buttons without the mic icon. The options remain clickable and maintain their hover effects.
+
+---
+
