@@ -9,13 +9,14 @@ export function ChatNavbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  
+  // Static user name for now
+  const userName = 'USER';
 
   const handleLogout = () => {
-    // In a real app, clear auth tokens/state here
     router.push('/');
   };
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -43,29 +44,38 @@ export function ChatNavbar() {
         </span>
       </div>
       
-      {/* Profile Icon (Right) with Dropdown */}
-      <div className="relative" ref={dropdownRef}>
-        <button 
-          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-          className="w-10 h-10 rounded-full bg-copper/10 border border-copper/50 flex items-center justify-center hover:bg-copper/20 hover:border-cyan hover:shadow-[0_0_15px_rgba(0,229,255,0.4)] transition-all duration-300 cursor-pointer focus:outline-none"
-        >
-          <User className="w-5 h-5 text-white" />
-        </button>
+      {/* Right Section: User Name + Profile */}
+      <div className="flex items-center gap-4" ref={dropdownRef}>
+        
+        {/* User Name Display */}
+        <span className="text-cyan font-mono text-xs md:text-sm tracking-widest uppercase hidden md:block">
+          {userName}
+        </span>
 
-        {/* Dropdown Menu */}
-        {isDropdownOpen && (
-          <div className="absolute right-0 top-12 w-48 rounded-xl bg-black/90 backdrop-blur-xl border border-copper/30 shadow-[0_0_30px_rgba(255,107,53,0.2)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 z-50">
-            <div className="p-2">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors group"
-              >
-                <LogOut className="w-4 h-4 text-copper group-hover:text-cyan transition-colors" />
-                <span className="font-medium tracking-wide">Logout</span>
-              </button>
+        {/* Profile Icon with Dropdown */}
+        <div className="relative">
+          <button 
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="w-10 h-10 rounded-full bg-copper/10 border border-copper/50 flex items-center justify-center hover:bg-copper/20 hover:border-cyan hover:shadow-[0_0_15px_rgba(0,229,255,0.4)] transition-all duration-300 cursor-pointer focus:outline-none"
+          >
+            <User className="w-5 h-5 text-white" />
+          </button>
+
+          {/* Dropdown Menu */}
+          {isDropdownOpen && (
+            <div className="absolute right-0 top-12 w-48 rounded-xl bg-black/90 backdrop-blur-xl border border-copper/30 shadow-[0_0_30px_rgba(255,107,53,0.2)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 z-50">
+              <div className="p-2">
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors group"
+                >
+                  <LogOut className="w-4 h-4 text-copper group-hover:text-cyan transition-colors" />
+                  <span className="font-medium tracking-wide">Logout</span>
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </nav>
   );

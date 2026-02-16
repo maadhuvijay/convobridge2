@@ -12,9 +12,8 @@ export default function LoginPage() {
   const handleStartChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim()) {
-      // In a real app, we'd save the name to state/context/storage here
-      console.log('Starting chat for:', name);
-      router.push('/chat');
+      // Pass the name via query parameter
+      router.push(`/chat?user=${encodeURIComponent(name)}`);
     }
   };
 

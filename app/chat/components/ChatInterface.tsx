@@ -1,4 +1,7 @@
+'use client';
+
 import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi } from 'lucide-react';
+import { useState } from 'react';
 
 const TOPICS = [
   { id: 'gaming', label: 'Gaming' },
@@ -9,6 +12,85 @@ const TOPICS = [
 ];
 
 export function ChatInterface() {
+  const userName = 'USER'; // Static for now until context/storage is implemented
+
+  const [currentTopic, setCurrentTopic] = useState<string | null>(null);
+  const [question, setQuestion] = useState("Select a topic to begin the mission.");
+  const [responses, setResponses] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Vocabulary State (Mocked for now until Backend is fully connected)
+  const [vocab, setVocab] = useState({
+    word: 'Mission',
+    type: 'noun',
+    definition: 'An important assignment given to a person or group.',
+    example: 'Your mission is to choose a topic.'
+  });
+
+  const handleTopicSelect = async (topicId: string) => {
+    setCurrentTopic(topicId);
+    setIsLoading(true);
+    setResponses([]); // Clear previous responses
+    
+    try {
+      // In a real scenario, this would call the Python Backend
+      // const res = await fetch('http://localhost:8000/api/start_conversation', { ... })
+      
+      // Simulating API delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Mock Response based on topic
+      let mockQuestion = "";
+      let mockResponses = [];
+      let mockVocab = { word: "", type: "", definition: "", example: "" };
+
+      switch(topicId) {
+        case 'gaming':
+          mockQuestion = "What kind of video games do you enjoy playing the most?";
+          mockResponses = [
+            "I really like adventure games because I can explore.",
+            "I prefer racing games because they are fast.",
+            "I enjoy puzzle games that make me think."
+          ];
+          mockVocab = { 
+            word: "Adventure", 
+            type: "noun", 
+            definition: "An unusual and exciting, typically hazardous, experience or activity.", 
+            example: "The hero went on a grand adventure." 
+          };
+          break;
+        case 'food':
+          mockQuestion = "If you could eat only one meal for the rest of your life, what would it be?";
+          mockResponses = [
+            "I would choose pizza because it has many toppings.",
+            "I love pasta, so I would pick spaghetti.",
+            "Definitely sushi, it's my favorite."
+          ];
+          mockVocab = {
+             word: "Cuisine",
+             type: "noun",
+             definition: "A style or method of cooking, especially as characteristic of a particular country.",
+             example: "Italian cuisine is famous for its pasta."
+          };
+          break;
+        default:
+          mockQuestion = `Let's talk about ${topicId}. What do you think about it?`;
+          mockResponses = ["It's interesting.", "I don't know much about it.", "Tell me more."];
+          mockVocab = { word: "Topic", type: "noun", definition: "A matter dealt with in a text, discourse, or conversation.", example: "That is an interesting topic." };
+      }
+
+      setQuestion(mockQuestion);
+      setResponses(mockResponses);
+      setVocab(mockVocab);
+
+    } catch (error) {
+      console.error("Failed to fetch conversation", error);
+      setQuestion("Connection error. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="w-full h-full px-8 pt-24 pb-8 grid grid-cols-1 md:grid-cols-12 gap-8 relative min-h-screen">
       
@@ -20,14 +102,24 @@ export function ChatInterface() {
             {TOPICS.map((topic) => (
               <button 
                 key={topic.id}
-                className="w-full text-left px-5 py-4 rounded-xl border border-white/10 bg-white/5 text-gray-300 hover:bg-copper/10 hover:border-copper hover:text-white hover:shadow-[0_0_15px_rgba(255,107,53,0.2)] transition-all duration-300 font-medium text-lg"
+                onClick={() => handleTopicSelect(topic.id)}
+                className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-300 font-medium text-lg relative overflow-hidden group ${
+                  currentTopic === topic.id 
+                    ? 'bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)]' 
+                    : 'bg-white/5 border-white/10 text-gray-300 hover:bg-copper/10 hover:border-copper hover:text-white'
+                }`}
               >
-                {topic.label}
+                <div className="relative z-10 flex items-center justify-between">
+                  {topic.label}
+                  {currentTopic === topic.id && <Activity className="w-4 h-4 text-cyan animate-pulse" />}
+                </div>
+                {/* Active Indicator Bar */}
+                {currentTopic === topic.id && <div className="absolute left-0 top-0 h-full w-1 bg-cyan"></div>}
               </button>
             ))}
           </div>
 
-          {/* System Status / Decor Area (Fills empty space) */}
+          {/* System Status */}
           <div className="mt-auto pt-6 border-t border-white/10 flex flex-col gap-4 opacity-70">
              <div className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-2">System Status</div>
              
@@ -54,7 +146,7 @@ export function ChatInterface() {
              {/* Connection Info */}
              <div className="flex items-center gap-2 text-[10px] text-gray-600 font-mono mt-2">
                 <Wifi className="w-3 h-3" />
-                <span>ID: AGENT-007-V2 // ENCRYPTED</span>
+                <span>ID: {userName}-007 // ENCRYPTED</span>
              </div>
           </div>
 
@@ -64,21 +156,20 @@ export function ChatInterface() {
       {/* Main Content Area */}
       <div className="md:col-span-9 flex flex-col h-full gap-8 relative">
         
-        {/* Top Section: Robot + Question (Speech Bubble) */}
+        {/* Top Section: Robot + Question */}
         <div className="flex flex-col md:flex-row items-start gap-8 mt-4">
           
           {/* Robot Avatar */}
           <div className="flex-shrink-0 w-48 h-48 rounded-2xl bg-black/40 backdrop-blur-xl border border-copper/40 flex items-center justify-center shadow-[0_0_40px_rgba(255,107,53,0.1)] relative group">
              <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,11,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-0 bg-[length:100%_4px,6px_100%] pointer-events-none rounded-2xl"></div>
-             <Bot className="w-24 h-24 text-copper group-hover:text-cyan transition-colors duration-500 animate-float drop-shadow-[0_0_20px_rgba(255,107,53,0.6)]" />
+             <Bot className={`w-24 h-24 text-copper group-hover:text-cyan transition-colors duration-500 drop-shadow-[0_0_20px_rgba(255,107,53,0.6)] ${isLoading ? 'animate-pulse' : 'animate-float'}`} />
           </div>
 
-          {/* Question Panel - Speech Bubble Style */}
-          <div className="relative mt-6 max-w-2xl">
-             {/* Speech Bubble Tail */}
+          {/* Question Panel */}
+          <div className="relative mt-6 max-w-2xl w-full">
              <div className="absolute top-6 -left-3 w-6 h-6 bg-black/60 border-l border-b border-cyan/30 transform rotate-45 z-0 hidden md:block"></div>
              
-             <div className="relative z-10 p-6 rounded-2xl rounded-tl-none bg-black/60 backdrop-blur-xl border border-cyan/30 shadow-[0_0_30px_rgba(0,229,255,0.15)] flex flex-col gap-3">
+             <div className="relative z-10 p-6 rounded-2xl rounded-tl-none bg-black/60 backdrop-blur-xl border border-cyan/30 shadow-[0_0_30px_rgba(0,229,255,0.15)] flex flex-col gap-3 min-h-[150px]">
                 <div className="flex justify-between items-start">
                     <span className="text-cyan font-mono text-xs tracking-widest uppercase mb-2">Agent Query</span>
                     <button className="p-1.5 rounded-full hover:bg-white/10 text-cyan transition-colors">
@@ -86,39 +177,57 @@ export function ChatInterface() {
                     </button>
                 </div>
                 
-                <p className="text-lg md:text-xl text-white font-light leading-relaxed">
-                  "What kind of video games do you enjoy playing the most?"
-                </p>
+                {isLoading ? (
+                  <div className="flex items-center gap-2 text-copper animate-pulse mt-2">
+                    <span className="w-2 h-2 bg-copper rounded-full"></span>
+                    <span className="w-2 h-2 bg-copper rounded-full animation-delay-200"></span>
+                    <span className="w-2 h-2 bg-copper rounded-full animation-delay-400"></span>
+                    <span className="font-mono text-sm uppercase">Processing Input...</span>
+                  </div>
+                ) : (
+                  <p className="text-lg md:text-xl text-white font-light leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    "{question}"
+                  </p>
+                )}
              </div>
           </div>
         </div>
 
         {/* Response Options */}
         <div className="w-full max-w-3xl flex flex-col gap-4 mt-8">
-            {[1, 2, 3].map((i) => (
-            <div key={i} className="group relative p-4 rounded-xl bg-white/5 border border-white/10 hover:border-copper hover:bg-copper/5 transition-all duration-300 flex items-center justify-between cursor-pointer">
-                <span className="text-gray-300 group-hover:text-white text-base">I really like playing adventure games because I can explore new worlds.</span>
-                <button className="flex-shrink-0 w-10 h-10 rounded-full bg-black/50 border border-white/20 flex items-center justify-center text-gray-400 group-hover:border-cyan group-hover:text-cyan group-hover:shadow-[0_0_10px_rgba(0,229,255,0.4)] transition-all">
-                    <Mic className="w-5 h-5" />
-                </button>
-            </div>
-            ))}
+            {isLoading ? (
+               // Loading Skeletons
+               [1, 2, 3].map((i) => (
+                 <div key={i} className="h-16 w-full rounded-xl bg-white/5 animate-pulse border border-white/5"></div>
+               ))
+            ) : responses.length > 0 ? (
+               responses.map((res, i) => (
+                <div key={i} className="group relative p-4 rounded-xl bg-white/5 border border-white/10 hover:border-copper hover:bg-copper/5 transition-all duration-300 flex items-center justify-between cursor-pointer animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: `${i * 100}ms` }}>
+                    <span className="text-gray-300 group-hover:text-white text-base">{res}</span>
+                    <button className="flex-shrink-0 w-10 h-10 rounded-full bg-black/50 border border-white/20 flex items-center justify-center text-gray-400 group-hover:border-cyan group-hover:text-cyan group-hover:shadow-[0_0_10px_rgba(0,229,255,0.4)] transition-all">
+                        <Mic className="w-5 h-5" />
+                    </button>
+                </div>
+               ))
+            ) : (
+              <div className="text-center text-gray-500 font-mono text-sm py-8">Select a topic to generate responses...</div>
+            )}
         </div>
 
-        {/* Vocabulary Window - Fixed to Bottom Right (Footer Position) */}
-        <div className="md:fixed md:bottom-4 md:right-8 w-full md:w-80 p-6 rounded-2xl bg-black/80 backdrop-blur-xl border border-copper/30 shadow-[0_0_40px_rgba(0,0,0,0.8)] flex flex-col gap-4 z-50 mt-8 md:mt-0 transition-all duration-300 hover:border-copper/60">
+        {/* Vocabulary Window */}
+        <div className={`md:fixed md:bottom-4 md:right-8 w-full md:w-80 p-6 rounded-2xl bg-black/80 backdrop-blur-xl border border-copper/30 shadow-[0_0_40px_rgba(0,0,0,0.8)] flex flex-col gap-4 z-50 mt-8 md:mt-0 transition-all duration-500 hover:border-copper/60 ${isLoading ? 'opacity-50 blur-sm pointer-events-none' : 'opacity-100'}`}>
             <div className="flex items-center gap-2 text-copper border-b border-white/10 pb-2">
                 <BookOpen className="w-5 h-5" />
                 <h3 className="font-mono text-sm tracking-widest uppercase">Vocabulary</h3>
             </div>
             
             <div>
-                <h4 className="text-2xl font-bold text-white mb-1">Hobby</h4>
-                <p className="text-sm text-gray-400 italic mb-3">noun • /ˈhɒbi/</p>
-                <p className="text-gray-300 text-sm mb-4">An activity done regularly in one's leisure time for pleasure.</p>
+                <h4 className="text-2xl font-bold text-white mb-1">{vocab.word}</h4>
+                <p className="text-sm text-gray-400 italic mb-3">{vocab.type} • /.../</p>
+                <p className="text-gray-300 text-sm mb-4">{vocab.definition}</p>
                 
                 <div className="p-3 rounded-lg bg-white/5 border border-white/5 text-sm text-gray-300 italic border-l-2 border-l-cyan">
-                "My favorite hobby is painting landscapes."
+                "{vocab.example}"
                 </div>
 
                 <button className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-copper/10 border border-copper/30 text-copper hover:bg-copper/20 hover:border-copper hover:text-white hover:shadow-[0_0_15px_rgba(255,107,53,0.2)] transition-all duration-300 group">

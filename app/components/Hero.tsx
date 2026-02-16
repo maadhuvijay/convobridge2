@@ -1,5 +1,6 @@
-import { Bot, MessageSquare, Sparkles, Puzzle } from 'lucide-react';
+import { Bot, MessageSquare, Sparkles } from 'lucide-react';
 import Link from 'next/link';
+import { PuzzleIcon } from './PuzzleIcon';
 
 export function Hero() {
   return (
@@ -21,12 +22,12 @@ export function Hero() {
       <p className="text-lg md:text-2xl text-gray-300 mb-12 max-w-4xl font-light tracking-wide leading-relaxed drop-shadow-md flex flex-col md:flex-row items-center justify-center gap-4 md:gap-2">
         <span className="text-copper font-medium whitespace-nowrap">Practice real conversations</span>
         
-        <Puzzle className="w-5 h-5 text-cyan animate-pulse hidden md:block" />
+        <PuzzleIcon className="w-6 h-6 animate-pulse hidden md:block drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
         <span className="w-1 h-1 bg-cyan rounded-full md:hidden"></span>
         
         <span className="text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] whitespace-nowrap">Build confidence</span>
         
-        <Puzzle className="w-5 h-5 text-cyan animate-pulse hidden md:block" />
+        <PuzzleIcon className="w-6 h-6 animate-pulse hidden md:block drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
         <span className="w-1 h-1 bg-cyan rounded-full md:hidden"></span>
         
         <span className="text-cyan font-bold drop-shadow-[0_0_10px_rgba(0,229,255,0.8)] animate-pulse whitespace-nowrap">Find your voice</span>
