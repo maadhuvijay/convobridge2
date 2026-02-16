@@ -120,6 +120,11 @@ export function ChatInterface() {
                 <div className="p-3 rounded-lg bg-white/5 border border-white/5 text-sm text-gray-300 italic border-l-2 border-l-cyan">
                 "My favorite hobby is painting landscapes."
                 </div>
+
+                <button className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-copper/10 border border-copper/30 text-copper hover:bg-copper/20 hover:border-copper hover:text-white hover:shadow-[0_0_15px_rgba(255,107,53,0.2)] transition-all duration-300 group">
+                    <Volume2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold tracking-widest uppercase">Hear me say</span>
+                </button>
             </div>
         </div>
 
