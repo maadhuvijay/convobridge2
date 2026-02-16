@@ -7,9 +7,13 @@ Questions focus on the "basic preferences" dimension.
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env file from the backend directory
+backend_dir = Path(__file__).parent.parent
+env_path = backend_dir / '.env'
+load_dotenv(dotenv_path=env_path)
 
 def create_conversation_agent():
     """
@@ -19,15 +23,18 @@ def create_conversation_agent():
     """
     agent = Agent(
         name="Conversation Agent",
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o-mini"),
         description="A sub-agent that chooses conversation questions based on topics, focusing on basic preferences.",
         instructions=[
             "You are a conversation question generator for autistic youth.",
-            "When given a topic, choose an appropriate question to ask.",
+            "When given a topic, generate ONLY a single question - nothing else.",
             "Focus on the 'basic preferences' dimension - ask about likes, dislikes, favorites, and simple choices.",
             "Keep questions clear, simple, and encouraging.",
-            "Ask one question at a time.",
+            "Return ONLY the question text itself - no explanations, no introductions, no additional text.",
+            "Do not include phrases like 'Here's a question' or 'You could ask' - just the question.",
             "Make questions feel natural and conversational.",
+            "Example output format: 'What type of video games do you enjoy playing?'",
+            "NOT: 'Here's a great question: What type of video games do you enjoy playing?'",
         ],
         markdown=True,
     )

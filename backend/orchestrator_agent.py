@@ -7,10 +7,30 @@ with autistic youth in a safe and structured environment.
 from agno.team import Team
 from agno.models.openai import OpenAIChat
 from subagents.conversation_agent import create_conversation_agent
+from subagents.response_generate_agent import create_response_agent
+from subagents.vocabulary_agent import create_vocabulary_agent
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env file - check multiple locations
+backend_dir = Path(__file__).parent
+root_dir = backend_dir.parent
+
+# Try loading from multiple locations (in order of preference)
+env_locations = [
+    backend_dir / '.env',  # backend/.env (preferred)
+    root_dir / '.env',     # root/.env (fallback)
+    backend_dir / 'subagents' / '.env',  # backend/subagents/.env (fallback)
+]
+
+for env_path in env_locations:
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=True)
+        break
+else:
+    # If no .env file found, try default load_dotenv() behavior
+    load_dotenv()  # This will look in current directory and parent directories
 
 def create_orchestrator_agent():
     """
@@ -18,22 +38,34 @@ def create_orchestrator_agent():
     This is the entry point that users will interact with.
     The team coordinates sub-agents to handle conversation practice sessions.
     """
-    # Create the conversation agent member
+    # Create the sub-agent members
     conversation_agent = create_conversation_agent()
+    response_agent = create_response_agent()
+    vocabulary_agent = create_vocabulary_agent()
     
     # Create the orchestrator team
     team = Team(
         name="ConvoBridge Orchestrator",
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o-mini"),
         description="A helpful team for coordinating conversation practice sessions with teens.",
-        members=[conversation_agent],
+        members=[conversation_agent, response_agent, vocabulary_agent],
         instructions=[
             "You are a friendly and supportive team leader.",
             "Help coordinate conversation practice sessions.",
-            "Be encouraging and clear in your communication.",
             "When a topic is chosen, delegate to the Conversation Agent to generate an appropriate question.",
             "The Conversation Agent focuses on 'basic preferences' - likes, dislikes, favorites, and simple choices.",
-            "Synthesize the responses from team members to provide a clear, helpful response to the user.",
+            "IMPORTANT: When the Conversation Agent returns a question, extract and return ONLY the question text itself.",
+            "Remove any explanatory text, introductions, or additional commentary.",
+            "Return just the question - for example: 'What type of video games do you enjoy playing?'",
+            "Do not add any text before or after the question.",
+            "",
+            "The Response Agent is available to generate response options for questions.",
+            "It generates 2 response options based on the question's dimension and difficulty level.",
+            "The Response Agent focuses on Level 1 difficulty: simple and direct responses.",
+            "",
+            "The Vocabulary Agent is available to generate vocabulary words based on questions.",
+            "It identifies key vocabulary words that are relevant to the question and topic being discussed.",
+            "The Vocabulary Agent helps users learn new words relevant to their conversations.",
         ],
         markdown=True,
     )
