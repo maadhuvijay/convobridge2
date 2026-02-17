@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import List, Optional, Dict
-from datetime import datetime
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 import os
 import re
 import json
@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import threading
 
 # Import subprocess for audio conversion (replacing pydub due to Python 3.13 compatibility issues)
 import subprocess
@@ -86,7 +87,14 @@ from subagents.speech_analysis_agent import create_speech_analysis_agent, analyz
 from database import (
     create_user, get_user_by_id, get_user_by_name,
     create_session, is_first_question_for_topic,
-    end_session, get_active_session
+    end_session, get_active_session,
+    is_returning_user, get_last_topic_for_user,
+    get_or_create_session_topic, create_conversation_turn,
+    update_conversation_turn_with_response,
+    update_conversation_turn_with_speech_analysis,
+    save_response_options, save_vocabulary_word,
+    get_response_options_for_turn, get_current_session_topic,
+    get_current_turn, get_last_conversation_turn
 )
 from tools.text_to_speech import text_to_speech_base64
 
@@ -182,6 +190,55 @@ DIMENSIONS = [
 # Note: User session tracking is now handled by Supabase database
 # See database.py for database operations
 
+# Lightweight session cache for active sessions (3 minute TTL)
+# This is an optional optimization - database is always the source of truth
+class SessionCache:
+    def __init__(self, ttl_minutes: int = 3):
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.ttl = timedelta(minutes=ttl_minutes)
+        self.lock = threading.Lock()
+    
+    def get(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Get cached session state if not expired"""
+        with self.lock:
+            if cache_key in self.cache:
+                entry = self.cache[cache_key]
+                if datetime.now() - entry['timestamp'] < self.ttl:
+                    return entry['data']
+                else:
+                    # Expired, remove it
+                    del self.cache[cache_key]
+            return None
+    
+    def set(self, cache_key: str, data: Dict[str, Any]):
+        """Cache session state with timestamp"""
+        with self.lock:
+            self.cache[cache_key] = {
+                'data': data,
+                'timestamp': datetime.now()
+            }
+    
+    def clear(self, cache_key: str):
+        """Remove entry from cache"""
+        with self.lock:
+            if cache_key in self.cache:
+                del self.cache[cache_key]
+    
+    def cleanup_expired(self):
+        """Remove all expired entries (can be called periodically)"""
+        with self.lock:
+            now = datetime.now()
+            expired_keys = [
+                key for key, entry in self.cache.items()
+                if now - entry['timestamp'] >= self.ttl
+            ]
+            for key in expired_keys:
+                del self.cache[key]
+            return len(expired_keys)
+
+# Global session cache instance
+session_cache = SessionCache(ttl_minutes=3)
+
 # Initialize the orchestrator team and sub-agents
 orchestrator = create_orchestrator_agent()
 conversation_agent = create_conversation_agent()
@@ -192,6 +249,7 @@ speech_analysis_agent = create_speech_analysis_agent()
 class TopicRequest(BaseModel):
     topic: str
     user_id: str
+    session_id: str  # Required: session_id from login
     difficulty_level: int = 1
 
 class VocabularyWord(BaseModel):
@@ -210,17 +268,21 @@ class QuestionOnlyResponse(BaseModel):
     question: str
     dimension: str = "Basic Preferences"
     audio_base64: Optional[str] = None  # Base64-encoded audio for text-to-speech
+    turn_id: Optional[str] = None  # Conversation turn ID for linking response options and vocabulary
 
 class ContinueConversationRequest(BaseModel):
     topic: str
     user_id: str
+    session_id: str  # Required: session_id from login
     previous_question: str
+    previous_turn_id: Optional[str] = None  # ID of previous conversation turn
     user_response: Optional[str] = None
     difficulty_level: int = 1
 
 class ConversationDetailsRequest(BaseModel):
     question: str
     topic: str
+    turn_id: str  # Required: conversation_turn_id to link response options and vocabulary
     difficulty_level: int = 1
     dimension: str = "Basic Preferences"
 
@@ -237,6 +299,8 @@ class LoginResponse(BaseModel):
     login_timestamp: str
     session_id: Optional[str] = None
     message: str
+    is_returning_user: bool = False
+    last_topic: Optional[str] = None  # Last topic name if returning user
 
 class GetUserRequest(BaseModel):
     user_id: Optional[str] = None
@@ -281,6 +345,17 @@ class LogoutResponse(BaseModel):
     session_id: Optional[str] = None
     ended_at: Optional[str] = None
 
+class GetPreviousTopicStateRequest(BaseModel):
+    user_id: str
+    topic_name: str
+
+class GetPreviousTopicStateResponse(BaseModel):
+    topic_name: str
+    difficulty_level: int
+    dimension: str
+    last_response_options: List[str]
+    last_question: Optional[str] = None
+
 @app.get("/")
 def read_root():
     return {"status": "ConvoBridge Backend Active"}
@@ -319,6 +394,17 @@ async def login(request: LoginRequest):
         user_id = str(user['id'])
         login_timestamp = datetime.now().isoformat()
         
+        # Check if returning user
+        returning = is_returning_user(username)
+        last_topic = None
+        
+        if returning:
+            # Get last topic for returning user
+            last_topic_data = get_last_topic_for_user(user_id)
+            if last_topic_data and 'topic_name' in last_topic_data:
+                last_topic = last_topic_data['topic_name']
+                print(f"Returning user '{username}' - last topic: {last_topic}")
+        
         # Create a new session for this login
         session = create_session(user_id)
         session_id = str(session['id']) if session else None
@@ -332,7 +418,9 @@ async def login(request: LoginRequest):
             "username": user['name'],
             "login_timestamp": login_timestamp,
             "session_id": session_id,
-            "message": "Login successful"
+            "message": "Login successful",
+            "is_returning_user": returning,
+            "last_topic": last_topic
         }
     except HTTPException:
         raise
@@ -396,6 +484,54 @@ async def logout(request: LogoutRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error during logout: {str(e)}")
+
+@app.post("/api/get_previous_topic_state", response_model=GetPreviousTopicStateResponse)
+async def get_previous_topic_state(request: GetPreviousTopicStateRequest):
+    """
+    Get the previous topic state for continuing a previous conversation.
+    Returns difficulty_level, dimension, and last response_options for the topic.
+    """
+    try:
+        user_id = request.user_id
+        topic_name = request.topic_name
+        
+        # Get last topic data for user
+        last_topic_data = get_last_topic_for_user(user_id)
+        
+        if not last_topic_data or last_topic_data.get('topic_name') != topic_name:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No previous conversation found for topic '{topic_name}'"
+            )
+        
+        # Extract information from last turn
+        difficulty_level = last_topic_data.get('difficulty_level', 1)
+        dimension = last_topic_data.get('dimension', 'Basic Preferences')
+        last_question = last_topic_data.get('question', '')
+        turn_id = str(last_topic_data['id'])
+        
+        # Get response options for the last turn
+        response_options_data = get_response_options_for_turn(turn_id)
+        last_response_options = [opt['option_text'] for opt in response_options_data] if response_options_data else []
+        
+        # If no response options found, return empty list (frontend will generate new ones)
+        if not last_response_options:
+            print(f"Warning: No response options found for turn {turn_id}, returning empty list")
+        
+        return {
+            "topic_name": topic_name,
+            "difficulty_level": difficulty_level,
+            "dimension": dimension,
+            "last_response_options": last_response_options,
+            "last_question": last_question
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting previous topic state: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error retrieving previous topic state: {str(e)}")
 
 @app.post("/api/get_user", response_model=GetUserResponse)
 async def get_user(request: GetUserRequest):
@@ -490,6 +626,41 @@ async def start_conversation(request: TopicRequest):
         # Remove leading/trailing quotes if any
         question_text = question_text.strip('"\'')
         
+        # Save conversation state to database
+        turn_id = None
+        try:
+            # Get or create session_topic
+            session_topic = get_or_create_session_topic(request.session_id, topic)
+            if not session_topic:
+                print(f"Warning: Failed to get/create session_topic for session {request.session_id}, topic {topic}")
+            else:
+                session_topic_id = str(session_topic['id'])
+                # Get current turn count to determine turn_number
+                current_turn = get_current_turn(session_topic_id)
+                turn_number = 1
+                if current_turn:
+                    turn_number = current_turn.get('turn_number', 0) + 1
+                
+                # Create conversation_turn
+                conversation_turn = create_conversation_turn(
+                    session_topic_id=session_topic_id,
+                    turn_number=turn_number,
+                    dimension=dimension,
+                    difficulty_level=request.difficulty_level,
+                    question=question_text
+                )
+                
+                if conversation_turn:
+                    turn_id = str(conversation_turn['id'])
+                    print(f"Created conversation turn {turn_number} (ID: {turn_id}) for topic {topic}")
+                else:
+                    print(f"Warning: Failed to create conversation_turn for session_topic {session_topic_id}")
+        except Exception as e:
+            print(f"Warning: Error saving conversation state to database: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if database save fails
+        
         # Generate audio for the question using text-to-speech
         audio_base64 = None
         try:
@@ -510,7 +681,8 @@ async def start_conversation(request: TopicRequest):
         return {
             "question": question_text,
             "dimension": dimension,
-            "audio_base64": audio_base64
+            "audio_base64": audio_base64,
+            "turn_id": turn_id
         }
     except Exception as e:
         print(f"Error starting conversation: {e}")
@@ -525,6 +697,25 @@ async def continue_conversation(request: ContinueConversationRequest):
     try:
         if not request.user_response:
             raise HTTPException(status_code=400, detail="user_response is required for follow-up questions")
+        
+        # Update previous turn with user response (if previous_turn_id provided)
+        if request.previous_turn_id:
+            try:
+                # Determine response type (for now, assume custom_speech or custom_text)
+                # Frontend should indicate if it was a selected option
+                response_type = "custom_speech"  # Default, can be updated based on frontend input
+                updated_turn = update_conversation_turn_with_response(
+                    turn_id=request.previous_turn_id,
+                    user_response=request.user_response,
+                    response_type=response_type
+                )
+                if updated_turn:
+                    print(f"Updated previous turn {request.previous_turn_id} with user response")
+                else:
+                    print(f"Warning: Failed to update previous turn {request.previous_turn_id}")
+            except Exception as e:
+                print(f"Warning: Error updating previous turn: {e}")
+                # Continue even if update fails
         
         # Orchestrator chooses dimension based on user response and engagement
         # For now, randomly select a dimension (can be enhanced with orchestrator logic later)
@@ -658,6 +849,41 @@ async def continue_conversation(request: ContinueConversationRequest):
         print(f"[DEBUG] After formatting, formatted_question: {repr(formatted_question)}")
         print(f"Generated follow-up question: {formatted_question}")
         
+        # Save new conversation turn to database
+        turn_id = None
+        try:
+            # Get or create session_topic
+            session_topic = get_or_create_session_topic(request.session_id, request.topic)
+            if not session_topic:
+                print(f"Warning: Failed to get/create session_topic for session {request.session_id}, topic {request.topic}")
+            else:
+                session_topic_id = str(session_topic['id'])
+                # Get current turn count to determine turn_number
+                current_turn = get_current_turn(session_topic_id)
+                turn_number = 1
+                if current_turn:
+                    turn_number = current_turn.get('turn_number', 0) + 1
+                
+                # Create new conversation_turn for follow-up question
+                conversation_turn = create_conversation_turn(
+                    session_topic_id=session_topic_id,
+                    turn_number=turn_number,
+                    dimension=dimension,
+                    difficulty_level=request.difficulty_level,
+                    question=formatted_question
+                )
+                
+                if conversation_turn:
+                    turn_id = str(conversation_turn['id'])
+                    print(f"Created follow-up conversation turn {turn_number} (ID: {turn_id}) for topic {request.topic}")
+                else:
+                    print(f"Warning: Failed to create conversation_turn for session_topic {session_topic_id}")
+        except Exception as e:
+            print(f"Warning: Error saving conversation state to database: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if database save fails
+        
         # Generate audio for the question using text-to-speech
         audio_base64 = None
         try:
@@ -675,7 +901,7 @@ async def continue_conversation(request: ContinueConversationRequest):
             print(f"Warning: Failed to generate audio for follow-up question: {e}")
             # Don't fail the request if audio generation fails
             
-        return {"question": formatted_question, "dimension": dimension, "audio_base64": audio_base64}
+        return {"question": formatted_question, "dimension": dimension, "audio_base64": audio_base64, "turn_id": turn_id}
     except Exception as e:
         print(f"Error continuing conversation: {e}")
         import traceback
@@ -786,6 +1012,36 @@ async def get_conversation_details(request: ConversationDetailsRequest):
             generate_vocabulary()
         )
         
+        # Save response options and vocabulary to database
+        try:
+            if request.turn_id:
+                # Save response options
+                saved_options = save_response_options(request.turn_id, options)
+                if saved_options:
+                    print(f"Saved {len(saved_options)} response options for turn {request.turn_id}")
+                else:
+                    print(f"Warning: Failed to save response options for turn {request.turn_id}")
+                
+                # Save vocabulary word
+                saved_vocab = save_vocabulary_word(
+                    conversation_turn_id=request.turn_id,
+                    word=vocab_data['word'],
+                    word_type=vocab_data['type'],
+                    definition=vocab_data['definition'],
+                    example=vocab_data['example']
+                )
+                if saved_vocab:
+                    print(f"Saved vocabulary word '{vocab_data['word']}' for turn {request.turn_id}")
+                else:
+                    print(f"Warning: Failed to save vocabulary word for turn {request.turn_id}")
+            else:
+                print(f"Warning: No turn_id provided, skipping database save")
+        except Exception as e:
+            print(f"Warning: Error saving conversation details to database: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if database save fails
+        
         return {
             "response_options": options,
             "vocabulary": vocab_data
@@ -861,7 +1117,8 @@ async def analyze_speech(request: SpeechAnalysisRequest):
 @app.post("/api/process-audio", response_model=SpeechAnalysisResponse)
 async def process_audio(
     audio: UploadFile = File(...),
-    expected_response: Optional[str] = Form(None)
+    expected_response: Optional[str] = Form(None),
+    turn_id: Optional[str] = Form(None)  # Conversation turn ID to save speech analysis
 ):
     """
     Process uploaded audio file.
@@ -994,6 +1251,32 @@ async def process_audio(
             # Ensure wer_estimate is present (can be null)
             if 'wer_estimate' not in analysis_data:
                 analysis_data['wer_estimate'] = None
+            
+            # Save speech analysis to database if turn_id provided
+            if turn_id:
+                try:
+                    updated_turn = update_conversation_turn_with_speech_analysis(
+                        turn_id=turn_id,
+                        transcript=analysis_data['transcript'],
+                        clarity_score=analysis_data['clarity_score'],
+                        wer_estimate=analysis_data.get('wer_estimate'),
+                        pace_wpm=analysis_data['pace_wpm'],
+                        filler_words=analysis_data['filler_words'],
+                        feedback=analysis_data['feedback'],
+                        strengths=analysis_data['strengths'],
+                        suggestions=analysis_data['suggestions']
+                    )
+                    if updated_turn:
+                        print(f"Saved speech analysis for turn {turn_id}")
+                    else:
+                        print(f"Warning: Failed to save speech analysis for turn {turn_id}")
+                except Exception as e:
+                    print(f"Warning: Error saving speech analysis to database: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue even if database save fails
+            else:
+                print(f"Warning: No turn_id provided, skipping speech analysis database save")
             
             print(f"Audio processed successfully, file size: {file_size} bytes")
             return analysis_data

@@ -2,7 +2,7 @@
 
 import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi, Circle, Star, Sparkles, Trophy } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 const TOPICS = [
   { id: 'gaming', label: 'Gaming' },
@@ -14,12 +14,32 @@ const TOPICS = [
 
 export function ChatInterface() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const userName = searchParams.get('user') || 'USER';
   const userId = searchParams.get('userId') || userName.toLowerCase().replace(/\s+/g, '_');
+  const sessionId = searchParams.get('sessionId') || null; // Get session_id from URL
+
+  // Check if sessionId is missing and redirect to login
+  useEffect(() => {
+    const currentSessionId = searchParams.get('sessionId');
+    if (!currentSessionId) {
+      console.warn('No sessionId found in URL. Redirecting to login...');
+      console.log('Current URL params:', {
+        user: searchParams.get('user'),
+        userId: searchParams.get('userId'),
+        sessionId: searchParams.get('sessionId'),
+        all: Array.from(searchParams.entries())
+      });
+      // Redirect to login immediately
+      router.push('/login');
+    }
+  }, [router, searchParams]);
 
   const [currentTopic, setCurrentTopic] = useState<string | null>(null);
   const [question, setQuestion] = useState(""); // Question is managed dynamically
   const [previousQuestion, setPreviousQuestion] = useState<string | null>(null);
+  const [currentTurnId, setCurrentTurnId] = useState<string | null>(null); // Track current conversation turn ID
+  const [previousTurnId, setPreviousTurnId] = useState<string | null>(null); // Track previous turn ID for continue conversation
   const [questionAudio, setQuestionAudio] = useState<string | null>(null); // Base64 audio for current question
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isPlayingVocabAudio, setIsPlayingVocabAudio] = useState(false);
@@ -362,6 +382,15 @@ export function ChatInterface() {
       return;
     }
     
+    // Get sessionId from URL params (in case it wasn't captured initially)
+    const effectiveSessionId = sessionId || searchParams.get('sessionId');
+    
+    if (!effectiveSessionId) {
+      console.error("Session ID is required for continuing conversation");
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       // Get follow-up question using continue_conversation endpoint (uses tools)
       const questionRes = await fetch('http://localhost:8000/api/continue_conversation', {
@@ -372,7 +401,9 @@ export function ChatInterface() {
         body: JSON.stringify({
           topic: currentTopic,
           user_id: userId,
+          session_id: effectiveSessionId, // Pass session_id
           previous_question: previousQuestion,
+          previous_turn_id: previousTurnId, // Pass previous turn_id to update with user response
           user_response: userResponse,
           difficulty_level: 1
         })
@@ -386,38 +417,60 @@ export function ChatInterface() {
       setQuestion(questionData.question);
       setPreviousQuestion(questionData.question); // Store for next follow-up
       setQuestionAudio(questionData.audio_base64 || null); // Store audio for playback
+      setPreviousTurnId(currentTurnId); // Store current turn as previous for next iteration
+      setCurrentTurnId(questionData.turn_id || null); // Store new turn_id
       setIsLoading(false);
 
       // Load response options and vocabulary
-      try {
-        const detailsRes = await fetch('http://localhost:8000/api/get_conversation_details', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            question: questionData.question,
-            topic: currentTopic,
-            difficulty_level: 1,
-            dimension: questionData.dimension || "Basic Preferences"
-          })
-        });
+      // Only if turn_id is available
+      if (questionData.turn_id) {
+        try {
+          const detailsRes = await fetch('http://localhost:8000/api/get_conversation_details', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              question: questionData.question,
+              topic: currentTopic,
+              turn_id: questionData.turn_id, // Pass turn_id to save response options and vocabulary
+              difficulty_level: 1,
+              dimension: questionData.dimension || "Basic Preferences"
+            })
+          });
 
-        if (detailsRes.ok) {
-          const detailsData = await detailsRes.json();
-          setResponses(detailsData.response_options || []);
-          
-          if (detailsData.vocabulary) {
-            setVocab({
-              word: detailsData.vocabulary.word || "Topic",
-              type: detailsData.vocabulary.type || "noun",
-              definition: detailsData.vocabulary.definition || "A matter dealt with in a text, discourse, or conversation.",
-              example: detailsData.vocabulary.example || "That is an interesting topic."
-            });
+          if (detailsRes.ok) {
+            const detailsData = await detailsRes.json();
+            setResponses(detailsData.response_options || []);
+            
+            if (detailsData.vocabulary) {
+              setVocab({
+                word: detailsData.vocabulary.word || "Topic",
+                type: detailsData.vocabulary.type || "noun",
+                definition: detailsData.vocabulary.definition || "A matter dealt with in a text, discourse, or conversation.",
+                example: detailsData.vocabulary.example || "That is an interesting topic."
+              });
+            }
+          } else {
+            // Fallback if details endpoint fails
+            console.warn("Failed to load conversation details, using defaults");
+            setResponses([
+              "I like that topic.",
+              "I'm not sure about that.",
+              "Choose your own response"
+            ]);
           }
+        } catch (detailsError) {
+          console.error("Failed to load conversation details", detailsError);
+          setResponses([
+            "I like that topic.",
+            "I'm not sure about that.",
+            "Choose your own response"
+          ]);
         }
-      } catch (detailsError) {
-        console.error("Failed to load conversation details", detailsError);
+      } else {
+        // Fallback if no turn_id
+        console.warn("No turn_id available, using default response options");
         setResponses([
           "I like that topic.",
           "I'm not sure about that.",
@@ -441,6 +494,22 @@ export function ChatInterface() {
     
     try {
       // Step 1: Get question immediately using orchestrator (fast endpoint)
+      // Get sessionId from URL params (in case it wasn't captured initially)
+      const effectiveSessionId = sessionId || searchParams.get('sessionId');
+      
+      if (!effectiveSessionId) {
+        console.error('Session ID missing. URL params:', {
+          user: userName,
+          userId: userId,
+          sessionId: sessionId,
+          allParams: Array.from(searchParams.entries())
+        });
+        // Redirect to login
+        router.push('/login');
+        setIsLoading(false);
+        return;
+      }
+      
       const questionRes = await fetch('http://localhost:8000/api/start_conversation', {
         method: 'POST',
         headers: {
@@ -449,6 +518,7 @@ export function ChatInterface() {
           body: JSON.stringify({
             topic: topicId,
             user_id: userId,
+            session_id: effectiveSessionId,
             difficulty_level: 1
           })
       }).catch((fetchError) => {
@@ -470,23 +540,27 @@ export function ChatInterface() {
       setQuestion(questionData.question);
       setPreviousQuestion(questionData.question); // Store for follow-up questions
       setQuestionAudio(questionData.audio_base64 || null); // Store audio for playback
+      setCurrentTurnId(questionData.turn_id || null); // Store turn_id for linking response options/vocabulary
       setWelcomeMessage({ line1: "", line2: "" });
       setIsLoading(false); // Stop loading spinner - question is shown
       
       // Step 2: Load response options and vocabulary in parallel (background)
-      try {
-        const detailsRes = await fetch('http://localhost:8000/api/get_conversation_details', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            question: questionData.question,
-            topic: topicId,
-            difficulty_level: 1,
-            dimension: questionData.dimension || "Basic Preferences"
-          })
-        });
+      // Only if turn_id is available
+      if (questionData.turn_id) {
+        try {
+          const detailsRes = await fetch('http://localhost:8000/api/get_conversation_details', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              question: questionData.question,
+              topic: topicId,
+              turn_id: questionData.turn_id, // Pass turn_id to save response options and vocabulary
+              difficulty_level: 1,
+              dimension: questionData.dimension || "Basic Preferences"
+            })
+          });
 
         if (detailsRes.ok) {
           const detailsData = await detailsRes.json();
@@ -520,6 +594,21 @@ export function ChatInterface() {
       } catch (detailsError) {
         // Non-fatal error - question is already shown
         console.error("Failed to load conversation details", detailsError);
+        setResponses([
+          "I like that topic.",
+          "I'm not sure about that.",
+          "Choose your own response"
+        ]);
+        setVocab({ 
+          word: "Topic", 
+          type: "noun", 
+          definition: "A matter dealt with in a text, discourse, or conversation.", 
+          example: "That is an interesting topic." 
+        });
+      }
+      } else {
+        // Fallback if no turn_id
+        console.warn("No turn_id available, using default response options");
         setResponses([
           "I like that topic.",
           "I'm not sure about that.",
@@ -656,6 +745,11 @@ export function ChatInterface() {
       // Include expected response if a response option was selected
       if (selectedResponse && selectedResponse !== "Choose your own response") {
         formData.append('expected_response', selectedResponse);
+      }
+      
+      // Include turn_id to save speech analysis
+      if (currentTurnId) {
+        formData.append('turn_id', currentTurnId);
       }
 
       const response = await fetch('http://localhost:8000/api/process-audio', {
@@ -943,12 +1037,20 @@ export function ChatInterface() {
         <div className="h-full min-h-[600px] p-6 rounded-2xl bg-black/40 backdrop-blur-xl border border-copper shadow-[0_0_20px_rgba(255,107,53,0.3)] hover:shadow-[0_0_30px_rgba(255,107,53,0.5)] transition-all duration-300 flex flex-col">
           <h3 className="text-copper font-mono text-sm tracking-widest uppercase mb-6 border-b border-white/10 pb-4">Select Topic</h3>
           <div className="flex flex-col gap-4 flex-grow">
+            {!sessionId && (
+              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                ⚠️ Please log in to start a conversation. Redirecting...
+              </div>
+            )}
             {TOPICS.map((topic) => (
               <button 
                 key={topic.id}
                 onClick={() => handleTopicSelect(topic.id)}
+                disabled={!sessionId}
                 className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-300 font-medium text-lg relative overflow-hidden group ${
-                  currentTopic === topic.id 
+                  !sessionId
+                    ? 'opacity-50 cursor-not-allowed'
+                    : currentTopic === topic.id 
                     ? 'bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)]' 
                     : 'bg-white/5 border-white/10 text-gray-300 hover:bg-copper/10 hover:border-copper hover:text-white'
                 }`}

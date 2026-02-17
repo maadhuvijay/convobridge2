@@ -30,17 +30,35 @@ export default function LoginPage() {
 
         const loginData = await loginRes.json();
         
+        // Check if session_id is missing
+        if (!loginData.session_id) {
+          console.error('Login response missing session_id:', loginData);
+          alert('Warning: Session ID not created. This may be because Supabase is not configured. Please check your backend configuration.');
+        }
+        
         // Pass the username, user_id, and session_id via query parameters
         const params = new URLSearchParams({
           user: name.trim(),
-          userId: loginData.user_id
+          userId: loginData.user_id || ''
         });
         if (loginData.session_id) {
           params.append('sessionId', loginData.session_id);
+        } else {
+          console.warn('No session_id in login response - user will be redirected to login when trying to start conversation');
         }
+        
+        console.log('Login successful, navigating with params:', {
+          user: name.trim(),
+          userId: loginData.user_id,
+          sessionId: loginData.session_id,
+          fullResponse: loginData
+        });
+        
         router.push(`/chat?${params.toString()}`);
       } catch (error) {
         console.error("Login error:", error);
+        // Show error to user but still navigate (for development)
+        alert(`Login failed: ${error instanceof Error ? error.message : 'Unknown error'}. You may need to log in again.`);
         // Still navigate to chat even if login fails (for development)
         router.push(`/chat?user=${encodeURIComponent(name.trim())}`);
       }
