@@ -85,8 +85,10 @@ from subagents.vocabulary_agent import create_vocabulary_agent
 from subagents.speech_analysis_agent import create_speech_analysis_agent, analyze_speech_with_audio
 from database import (
     create_user, get_user_by_id, get_user_by_name,
-    create_session, is_first_question_for_topic
+    create_session, is_first_question_for_topic,
+    end_session, get_active_session
 )
+from tools.text_to_speech import text_to_speech_base64
 
 # Load .env file - check multiple locations
 backend_dir = Path(__file__).parent
@@ -207,6 +209,7 @@ class QuestionResponse(BaseModel):
 class QuestionOnlyResponse(BaseModel):
     question: str
     dimension: str = "Basic Preferences"
+    audio_base64: Optional[str] = None  # Base64-encoded audio for text-to-speech
 
 class ContinueConversationRequest(BaseModel):
     topic: str
@@ -257,6 +260,26 @@ class SpeechAnalysisResponse(BaseModel):
     feedback: str
     strengths: List[str]
     suggestions: List[str]
+
+class TextToSpeechRequest(BaseModel):
+    text: str
+    voice: Optional[str] = "nova"
+    model: Optional[str] = "tts-1-hd"
+    format: Optional[str] = "mp3"
+
+class TextToSpeechResponse(BaseModel):
+    audio_base64: str
+    format: str
+
+class LogoutRequest(BaseModel):
+    user_id: str
+    session_id: Optional[str] = None  # Optional: if not provided, will find active session
+
+class LogoutResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: Optional[str] = None
+    ended_at: Optional[str] = None
 
 @app.get("/")
 def read_root():
@@ -318,6 +341,61 @@ async def login(request: LoginRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+
+@app.post("/api/logout", response_model=LogoutResponse)
+async def logout(request: LogoutRequest):
+    """
+    Log user logout with timestamp.
+    Ends the active session by updating ended_at timestamp and setting status to 'completed'.
+    All session data (conversation turns, response options, vocabulary, etc.) is already saved
+    in the database during the session, so this just marks the session as completed.
+    """
+    try:
+        user_id = request.user_id.strip()
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID cannot be empty")
+        
+        session_id = request.session_id
+        
+        # If session_id not provided, find the active session for this user
+        if not session_id:
+            active_session = get_active_session(user_id)
+            if not active_session:
+                return {
+                    "success": False,
+                    "message": "No active session found for this user",
+                    "session_id": None,
+                    "ended_at": None
+                }
+            session_id = str(active_session['id'])
+        
+        # End the session
+        ended_session = end_session(session_id)
+        
+        if not ended_session:
+            return {
+                "success": False,
+                "message": "Failed to end session",
+                "session_id": session_id,
+                "ended_at": None
+            }
+        
+        ended_at = ended_session.get('ended_at')
+        print(f"User logged out: {user_id} (Session: {session_id}) at {ended_at}")
+        
+        return {
+            "success": True,
+            "message": "Logout successful. Session data saved.",
+            "session_id": session_id,
+            "ended_at": ended_at
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error during logout: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error during logout: {str(e)}")
 
 @app.post("/api/get_user", response_model=GetUserResponse)
 async def get_user(request: GetUserRequest):
@@ -412,9 +490,27 @@ async def start_conversation(request: TopicRequest):
         # Remove leading/trailing quotes if any
         question_text = question_text.strip('"\'')
         
+        # Generate audio for the question using text-to-speech
+        audio_base64 = None
+        try:
+            # Remove newlines for TTS (keep the text clean for speech)
+            clean_text_for_speech = question_text.replace('\n\n', '. ').replace('\n', ' ')
+            loop = asyncio.get_event_loop()
+            audio_base64 = await loop.run_in_executor(
+                None,
+                text_to_speech_base64,
+                clean_text_for_speech
+            )
+            if audio_base64:
+                print(f"Generated audio for question ({len(audio_base64)} characters base64)")
+        except Exception as e:
+            print(f"Warning: Failed to generate audio for question: {e}")
+            # Don't fail the request if audio generation fails
+        
         return {
             "question": question_text,
-            "dimension": dimension
+            "dimension": dimension,
+            "audio_base64": audio_base64
         }
     except Exception as e:
         print(f"Error starting conversation: {e}")
@@ -446,8 +542,11 @@ async def continue_conversation(request: ContinueConversationRequest):
             f"- topic: '{request.topic}'\n"
             f"- previous_question: '{request.previous_question}'\n\n"
             f"Then, use generate_followup_question with the same parameters to create a contextual follow-up.\n\n"
-            f"The follow-up should:\n"
+            f"CRITICAL REQUIREMENTS:\n"
             f"- Use 'Acknowledgement + Question' format\n"
+            f"- VARY your acknowledgement - use a different phrase than you might have used before\n"
+            f"- NEVER repeat the previous question: '{request.previous_question}'\n"
+            f"- Ask about a DIFFERENT aspect or angle of what the user mentioned\n"
             f"- Be about the specific things mentioned in the user's response\n"
             f"- Adapt to the {dimension} dimension\n"
             f"- Be natural and conversational for a teen"
@@ -455,7 +554,59 @@ async def continue_conversation(request: ContinueConversationRequest):
         
         # Run conversation agent (it will use the tools)
         response = conversation_agent.run(prompt)
+        
+        # ===== DIAGNOSTIC LOGGING =====
+        print("\n" + "="*80)
+        print("[DEBUG] RAW AGENT RESPONSE DIAGNOSTICS")
+        print("="*80)
+        print(f"[DEBUG] Response type: {type(response)}")
+        print(f"[DEBUG] Response class: {response.__class__.__name__}")
+        
+        # Check for content attribute
+        if hasattr(response, 'content'):
+            raw_content = response.content
+            print(f"[DEBUG] Raw response content length: {len(raw_content)} characters")
+            print(f"[DEBUG] Raw response content (first 500 chars): {repr(raw_content[:500])}")
+            print(f"[DEBUG] Raw response content (last 200 chars): {repr(raw_content[-200:])}")
+            print(f"[DEBUG] Raw response ends with punctuation: {raw_content.strip()[-1] if raw_content.strip() else 'N/A'} in {['.', '!', '?']}")
+        else:
+            print(f"[DEBUG] Response has no 'content' attribute")
+            print(f"[DEBUG] Available attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+        
+        # Check for finish reason or truncation indicators
+        if hasattr(response, 'finish_reason'):
+            print(f"[DEBUG] Finish reason: {response.finish_reason}")
+        if hasattr(response, 'usage'):
+            print(f"[DEBUG] Token usage: {response.usage}")
+        if hasattr(response, 'truncated'):
+            print(f"[DEBUG] Truncated flag: {response.truncated}")
+        if hasattr(response, 'model'):
+            print(f"[DEBUG] Model used: {response.model}")
+        
+        # Check response object structure
+        print(f"[DEBUG] Response object attributes: {[attr for attr in dir(response) if not attr.startswith('_') and not callable(getattr(response, attr, None))]}")
+        
+        # Try to get text content in different ways
+        if hasattr(response, 'get_content_as_string'):
+            try:
+                content_str = response.get_content_as_string()
+                print(f"[DEBUG] get_content_as_string() length: {len(content_str)} characters")
+            except Exception as e:
+                print(f"[DEBUG] get_content_as_string() error: {e}")
+        
+        if hasattr(response, 'text'):
+            print(f"[DEBUG] response.text length: {len(response.text)} characters")
+        
+        if hasattr(response, 'message'):
+            print(f"[DEBUG] response.message type: {type(response.message)}")
+        
+        print("="*80 + "\n")
+        # ===== END DIAGNOSTIC LOGGING =====
+        
         question_text = response.content.strip()
+        
+        print(f"[DEBUG] After .strip(), question_text length: {len(question_text)} characters")
+        print(f"[DEBUG] After .strip(), question_text (first 300 chars): {repr(question_text[:300])}")
         
         # Cleanup logic - but preserve the acknowledgement + question format
         # Remove common prefixes that might interfere
@@ -475,9 +626,50 @@ async def continue_conversation(request: ContinueConversationRequest):
         question_text = question_text.strip()
         question_text = question_text.strip('"\'')
         
-        print(f"Generated follow-up question: {question_text}")
+        print(f"[DEBUG] After final cleanup, question_text length: {len(question_text)} characters")
+        print(f"[DEBUG] After final cleanup, question_text: {repr(question_text)}")
+        
+        # Format follow-up questions: Split acknowledgement and question into separate lines
+        # Look for patterns like "That's great! Do you..." or "Nice! What do you..."
+        # Split on common patterns: ! followed by capital letter, or . followed by capital letter
+        # But preserve the natural flow
+        formatted_question = question_text
+        
+        # Try to detect acknowledgement + question pattern
+        # Pattern 1: Exclamation mark followed by space and capital letter (e.g., "That's great! Do you...")
+        exclamation_pattern = r'([!?])\s+([A-Z][a-z])'
+        if re.search(exclamation_pattern, question_text):
+            # Split on exclamation/question mark followed by space and capital letter
+            formatted_question = re.sub(exclamation_pattern, r'\1\n\n\2', question_text)
+        # Pattern 2: Period followed by space and capital letter (e.g., "That's great. Do you...")
+        elif re.search(r'\.\s+([A-Z][a-z])', question_text):
+            formatted_question = re.sub(r'\.\s+([A-Z][a-z])', r'.\n\n\1', question_text)
+        # Pattern 3: Comma followed by space and capital letter (less common but possible)
+        elif re.search(r',\s+([A-Z][a-z])', question_text):
+            formatted_question = re.sub(r',\s+([A-Z][a-z])', r',\n\n\1', question_text)
+        
+        print(f"[DEBUG] After formatting, formatted_question length: {len(formatted_question)} characters")
+        print(f"[DEBUG] After formatting, formatted_question: {repr(formatted_question)}")
+        print(f"Generated follow-up question: {formatted_question}")
+        
+        # Generate audio for the question using text-to-speech
+        audio_base64 = None
+        try:
+            # Remove newlines for TTS (keep the text clean for speech)
+            clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
+            loop = asyncio.get_event_loop()
+            audio_base64 = await loop.run_in_executor(
+                None,
+                text_to_speech_base64,
+                clean_text_for_speech
+            )
+            if audio_base64:
+                print(f"Generated audio for follow-up question ({len(audio_base64)} characters base64)")
+        except Exception as e:
+            print(f"Warning: Failed to generate audio for follow-up question: {e}")
+            # Don't fail the request if audio generation fails
             
-        return {"question": question_text, "dimension": dimension}
+        return {"question": formatted_question, "dimension": dimension, "audio_base64": audio_base64}
     except Exception as e:
         print(f"Error continuing conversation: {e}")
         import traceback
@@ -594,6 +786,51 @@ async def get_conversation_details(request: ConversationDetailsRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating conversation details: {str(e)}")
+
+@app.post("/api/text_to_speech", response_model=TextToSpeechResponse)
+async def generate_text_to_speech(request: TextToSpeechRequest):
+    """
+    Generate speech from text using OpenAI's TTS.
+    This endpoint can be called on-demand to regenerate audio for a question.
+    """
+    try:
+        if not request.text or not request.text.strip():
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        # Clean text for TTS (remove extra newlines)
+        clean_text = request.text.replace('\n\n', '. ').replace('\n', ' ').strip()
+        
+        # Generate audio
+        loop = asyncio.get_event_loop()
+        try:
+            audio_base64 = await loop.run_in_executor(
+                None,
+                text_to_speech_base64,
+                clean_text,
+                request.voice,
+                request.model,
+                request.format
+            )
+            
+            if not audio_base64:
+                raise HTTPException(status_code=500, detail="Failed to generate audio: TTS function returned None. Check backend logs for details.")
+        except Exception as executor_error:
+            print(f"Error in executor for text-to-speech: {executor_error}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Error generating speech in executor: {str(executor_error)}")
+        
+        return {
+            "audio_base64": audio_base64,
+            "format": request.format
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating text-to-speech: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error generating speech: {str(e)}")
 
 @app.post("/api/analyze_speech", response_model=SpeechAnalysisResponse)
 async def analyze_speech(request: SpeechAnalysisRequest):

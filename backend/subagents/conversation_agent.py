@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 # Import conversation tools
 from tools.conversation_tools import get_context, generate_followup_question
+from tools.text_to_speech import text_to_speech_base64
 
 # Load .env file from the backend directory
 backend_dir = Path(__file__).parent.parent
@@ -44,12 +45,17 @@ def create_conversation_agent():
             "  - First, use get_context to gather the conversation context.",
             "  - Then, use generate_followup_question to create a contextual follow-up.",
             "  - The follow-up should use the 'Acknowledgement + question' format.",
-            "  - Start with a brief, encouraging acknowledgement of what the user said.",
-            "  - Then ask a follow-up question that relates to the specific things mentioned in the user's response.",
+            "  - CRITICAL: Vary your acknowledgements - use different phrases each time to keep conversations natural.",
+            "  - Acknowledgement variety examples: 'That's great!', 'Cool!', 'Nice!', 'Awesome!', 'That sounds fun!', 'Interesting!', 'I see!', 'Got it!', 'That's awesome!', 'Sweet!', 'Neat!', 'That's really cool!'",
+            "  - Avoid repeating the same acknowledgement phrase in consecutive questions.",
+            "  - CRITICAL: NEVER repeat the same question that was asked before. Check the previous_question in context.",
+            "  - If the previous question was similar, ask about a DIFFERENT aspect or angle of the topic.",
             "  - The question should be about the specific thing the user mentioned (e.g., if they said 'super mario', ask about super mario, not just games in general).",
             "  - Adapt the question to the requested dimension chosen by the orchestrator.",
-            "  - Example format: 'That's great! Do you play alone or with someone?'",
-            "  - Example format: 'Nice choice! What do you like most about it?'",
+            "  - IMPORTANT: Format the acknowledgement and question on separate lines with a blank line between them.",
+            "  - Example format: 'That's great!\n\nDo you play alone or with someone?'",
+            "  - Example format: 'Cool!\n\nWhat do you like most about it?'",
+            "  - The acknowledgement should end with punctuation (! or .), followed by two newlines, then the question.",
             "",
             "Dimensions to adapt questions to:",
             "  - Basic Preferences: Likes, dislikes, favorites, simple choices",

@@ -11,11 +11,33 @@ export function ChatNavbar() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Get username from query parameters
+  // Get username and user_id from query parameters
   const userName = searchParams.get('user') || 'USER';
+  const userId = searchParams.get('userId') || '';
+  const sessionId = searchParams.get('sessionId') || null;
 
-  const handleLogout = () => {
-    router.push('/');
+  const handleLogout = async () => {
+    try {
+      // Call logout API endpoint to save exit timestamp
+      if (userId) {
+        await fetch('http://localhost:8000/api/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            session_id: sessionId || null
+          })
+        });
+      }
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Continue with logout even if API call fails
+    } finally {
+      // Redirect to home page
+      router.push('/');
+    }
   };
 
   useEffect(() => {

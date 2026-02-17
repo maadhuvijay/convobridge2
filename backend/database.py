@@ -211,7 +211,7 @@ def is_first_question_for_topic(user_id: str, topic_name: str) -> bool:
     Args:
         user_id: The user's UUID
         topic_name: The topic name
-        
+    
     Returns:
         True if this is the first question for this topic, False otherwise
     """
@@ -241,6 +241,68 @@ def is_first_question_for_topic(user_id: str, topic_name: str) -> bool:
     except Exception as e:
         print(f"Error checking first question: {e}")
         return True  # Default to True on error
+
+
+def end_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """
+    End a session by updating the ended_at timestamp and setting status to 'completed'.
+    This is called when a user logs out.
+    
+    Args:
+        session_id: The session UUID to end
+    
+    Returns:
+        Updated session dictionary with ended_at and status='completed', or None if operation failed
+    """
+    if not supabase:
+        print("Warning: Supabase not configured, cannot end session")
+        return None
+    
+    try:
+        # Update the session with ended_at timestamp and status
+        response = supabase.table('sessions').update({
+            'ended_at': datetime.now().isoformat(),
+            'status': 'completed'
+        }).eq('id', session_id).execute()
+        
+        if response.data and len(response.data) > 0:
+            session = response.data[0]
+            print(f"Session {session_id} ended successfully at {session.get('ended_at')}")
+            return session
+        return None
+    except Exception as e:
+        print(f"Error ending session: {e}")
+        return None
+
+
+def get_active_session(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the active session for a user.
+    
+    Args:
+        user_id: The user's UUID
+    
+    Returns:
+        Active session dictionary or None if not found
+    """
+    if not supabase:
+        return None
+    
+    try:
+        response = supabase.table('sessions')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .eq('status', 'active')\
+            .order('started_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        print(f"Error getting active session: {e}")
+        return None
 
 
 if __name__ == "__main__":

@@ -50,7 +50,8 @@ def get_context(
             f"Topic: {topic}\n"
             f"User Response: {user_response}\n"
             f"Dimension: {current_dimension}\n"
-            f"{f'Previous Question: {previous_question}' if previous_question else ''}"
+            f"{f'Previous Question: {previous_question}' if previous_question else 'No previous question'}\n"
+            f"IMPORTANT: Do NOT repeat the previous question. Ask about a different aspect or angle."
         )
     }
     
@@ -109,13 +110,19 @@ def generate_followup_question(
 Requirements:
 - Use "Acknowledgement + Question" format
 - Start with a brief, encouraging acknowledgement of what the user said
+- CRITICAL: Vary your acknowledgements - use different phrases to keep conversations natural
+- Acknowledgement variety examples: 'That's great!', 'Cool!', 'Nice!', 'Awesome!', 'That sounds fun!', 'Interesting!', 'I see!', 'Got it!', 'That's awesome!', 'Sweet!', 'Neat!', 'That's really cool!', 'How cool!', 'That's neat!', 'Sounds awesome!'
+- Avoid repeating the same acknowledgement phrase used in previous questions
+- CRITICAL: NEVER repeat the same question that was asked before (check previous_question in context)
+- If the previous question was similar, ask about a DIFFERENT aspect, angle, or detail of what the user mentioned
 - Ask a follow-up question that relates to the specific things mentioned in the user's response
 - Adapt the question to the "{current_dimension}" dimension
 - Make it natural and conversational for a teen
 - Keep it clear and simple (Level 1 difficulty)
 
 Example format: "That's great! Do you play alone or with someone?"
-Example format: "Nice choice! What do you like most about it?"
+Example format: "Cool! What do you like most about it?"
+Example format: "That sounds fun! How long have you been playing that?"
 """
 
 

@@ -30,8 +30,15 @@ export default function LoginPage() {
 
         const loginData = await loginRes.json();
         
-        // Pass the username via query parameter
-        router.push(`/chat?user=${encodeURIComponent(name.trim())}&userId=${encodeURIComponent(loginData.user_id)}`);
+        // Pass the username, user_id, and session_id via query parameters
+        const params = new URLSearchParams({
+          user: name.trim(),
+          userId: loginData.user_id
+        });
+        if (loginData.session_id) {
+          params.append('sessionId', loginData.session_id);
+        }
+        router.push(`/chat?${params.toString()}`);
       } catch (error) {
         console.error("Login error:", error);
         // Still navigate to chat even if login fails (for development)
