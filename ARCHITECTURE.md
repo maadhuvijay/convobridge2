@@ -773,6 +773,8 @@ pip install agno fastapi uvicorn python-dotenv openai
 3. Create `.env` file in `backend/` directory:
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 4. Start the backend server:
@@ -785,7 +787,11 @@ The server will start on `http://localhost:8000`
 ### Environment Variables
 
 **Backend** (`backend/.env`):
-- `OPENAI_API_KEY`: Your OpenAI API key (required)
+- `OPENAI_API_KEY` (required): Your OpenAI API key for LLM, TTS, and speech transcription
+- `SUPABASE_URL` (optional but recommended): Your Supabase project URL for database integration
+- `SUPABASE_ANON_KEY` (optional but recommended): Your Supabase anonymous key for database access
+
+**Note**: If Supabase credentials are not provided, the system will fall back to in-memory user ID generation, but session tracking and conversation history will not persist.
 
 **Frontend**: No environment variables required for basic setup.
 
