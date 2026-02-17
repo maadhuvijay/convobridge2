@@ -108,21 +108,25 @@ def generate_followup_question(
 {context_text}
 
 Requirements:
-- Use "Acknowledgement + Question" format
+- Use "Acknowledgement + Personal Preference + Question" format
 - Start with a brief, encouraging acknowledgement of what the user said
 - CRITICAL: Vary your acknowledgements - use different phrases to keep conversations natural
 - Acknowledgement variety examples: 'That's great!', 'Cool!', 'Nice!', 'Awesome!', 'That sounds fun!', 'Interesting!', 'I see!', 'Got it!', 'That's awesome!', 'Sweet!', 'Neat!', 'That's really cool!', 'How cool!', 'That's neat!', 'Sounds awesome!'
 - Avoid repeating the same acknowledgement phrase used in previous questions
+- After the acknowledgement, add a SHORT personal preference or relatable comment on the same line (e.g., 'I like that too', 'That's interesting', 'I can relate', 'Sounds fun', 'That's cool', 'I get that')
+- Keep the personal preference brief (3-6 words) and natural
 - CRITICAL: NEVER repeat the same question that was asked before (check previous_question in context)
 - If the previous question was similar, ask about a DIFFERENT aspect, angle, or detail of what the user mentioned
 - Ask a follow-up question that relates to the specific things mentioned in the user's response
 - Adapt the question to the "{current_dimension}" dimension
 - Make it natural and conversational for a teen
 - Keep it clear and simple (Level 1 difficulty)
+- Format: 'Acknowledgement + personal preference' on first line, blank line, then question on next line
 
-Example format: "That's great! Do you play alone or with someone?"
-Example format: "Cool! What do you like most about it?"
-Example format: "That sounds fun! How long have you been playing that?"
+Example format: "That's great! I like that too.\n\nDo you play alone or with someone?"
+Example format: "Cool! That sounds fun.\n\nWhat do you like most about it?"
+Example format: "That's awesome! I can relate.\n\nHow long have you been doing that?"
+Example format: "That sounds fun! I get that.\n\nWhat makes it enjoyable for you?"
 """
 
 

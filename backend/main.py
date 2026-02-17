@@ -543,8 +543,10 @@ async def continue_conversation(request: ContinueConversationRequest):
             f"- previous_question: '{request.previous_question}'\n\n"
             f"Then, use generate_followup_question with the same parameters to create a contextual follow-up.\n\n"
             f"CRITICAL REQUIREMENTS:\n"
-            f"- Use 'Acknowledgement + Question' format\n"
+            f"- Use 'Acknowledgement + Personal Preference + Question' format\n"
+            f"- Format: 'Acknowledgement + short personal preference' on first line, blank line, then question on next line\n"
             f"- VARY your acknowledgement - use a different phrase than you might have used before\n"
+            f"- Add a brief personal preference after the acknowledgement (e.g., 'I like that too', 'That's interesting', 'I can relate')\n"
             f"- NEVER repeat the previous question: '{request.previous_question}'\n"
             f"- Ask about a DIFFERENT aspect or angle of what the user mentioned\n"
             f"- Be about the specific things mentioned in the user's response\n"
@@ -629,21 +631,25 @@ async def continue_conversation(request: ContinueConversationRequest):
         print(f"[DEBUG] After final cleanup, question_text length: {len(question_text)} characters")
         print(f"[DEBUG] After final cleanup, question_text: {repr(question_text)}")
         
-        # Format follow-up questions: Split acknowledgement and question into separate lines
-        # Look for patterns like "That's great! Do you..." or "Nice! What do you..."
-        # Split on common patterns: ! followed by capital letter, or . followed by capital letter
-        # But preserve the natural flow
+        # Format follow-up questions: Split acknowledgement+preference and question into separate lines
+        # New pattern: "Acknowledgement + personal preference" on first line, question on next line
+        # Look for patterns like "That's great! I like that too. Do you..." or "Cool! That sounds fun. What do you..."
+        # The personal preference ends with a period, then the question starts with a capital letter
         formatted_question = question_text
         
-        # Try to detect acknowledgement + question pattern
-        # Pattern 1: Exclamation mark followed by space and capital letter (e.g., "That's great! Do you...")
-        exclamation_pattern = r'([!?])\s+([A-Z][a-z])'
-        if re.search(exclamation_pattern, question_text):
-            # Split on exclamation/question mark followed by space and capital letter
-            formatted_question = re.sub(exclamation_pattern, r'\1\n\n\2', question_text)
-        # Pattern 2: Period followed by space and capital letter (e.g., "That's great. Do you...")
-        elif re.search(r'\.\s+([A-Z][a-z])', question_text):
+        # Try to detect acknowledgement + personal preference + question pattern
+        # Pattern 1: Period followed by space and capital letter (e.g., "That's great! I like that too. Do you...")
+        # This handles the case where personal preference ends with period and question starts
+        # Check for period pattern first since it's more specific to the new format
+        if re.search(r'\.\s+([A-Z][a-z])', question_text):
+            # Split on period followed by space and capital letter
+            # This will split after the personal preference, before the question
             formatted_question = re.sub(r'\.\s+([A-Z][a-z])', r'.\n\n\1', question_text)
+        # Pattern 2: Exclamation mark followed by space and capital letter (e.g., "That's great! Do you...")
+        # This handles cases where there's no personal preference or it's very short
+        elif re.search(r'([!?])\s+([A-Z][a-z])', question_text):
+            # Split on exclamation/question mark followed by space and capital letter
+            formatted_question = re.sub(r'([!?])\s+([A-Z][a-z])', r'\1\n\n\2', question_text)
         # Pattern 3: Comma followed by space and capital letter (less common but possible)
         elif re.search(r',\s+([A-Z][a-z])', question_text):
             formatted_question = re.sub(r',\s+([A-Z][a-z])', r',\n\n\1', question_text)
