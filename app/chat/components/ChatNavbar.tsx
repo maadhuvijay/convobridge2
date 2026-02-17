@@ -53,12 +53,12 @@ export function ChatNavbar() {
   return (
     <nav className="fixed top-0 left-0 w-full z-50 px-6 py-4 flex items-center justify-between backdrop-blur-md bg-black/60 border-b border-copper/30 shadow-[0_4px_30px_rgba(255,107,53,0.1)]">
       
-      {/* Logo Section (Left) */}
-      <Link href="/" className="flex items-center gap-3 group">
-        <div className="w-10 h-10 rounded-lg bg-black/80 border border-copper flex items-center justify-center shadow-[0_0_15px_rgba(255,107,53,0.4)] group-hover:shadow-[0_0_25px_rgba(255,107,53,0.6)] transition-all duration-300">
-          <Bot className="w-6 h-6 text-copper group-hover:text-white transition-colors duration-300" />
+      {/* Logo Section (Left) - Display only, no link */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-black/80 border border-copper flex items-center justify-center shadow-[0_0_15px_rgba(255,107,53,0.4)] transition-all duration-300">
+          <Bot className="w-6 h-6 text-copper transition-colors duration-300" />
         </div>
-      </Link>
+      </div>
       
       {/* ConvoBridge Text (Middle) */}
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">

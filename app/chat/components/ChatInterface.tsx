@@ -1,6 +1,6 @@
 'use client';
 
-import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi, Circle, Star, Sparkles, Trophy } from 'lucide-react';
+import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi, Circle, Star, Sparkles, Trophy, X, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -18,6 +18,8 @@ export function ChatInterface() {
   const userName = searchParams.get('user') || 'USER';
   const userId = searchParams.get('userId') || userName.toLowerCase().replace(/\s+/g, '_');
   const sessionId = searchParams.get('sessionId') || null; // Get session_id from URL
+  const isReturningUser = searchParams.get('isReturningUser') === 'true';
+  const lastTopic = searchParams.get('lastTopic') || null;
 
   // Check if sessionId is missing and redirect to login
   useEffect(() => {
@@ -44,20 +46,35 @@ export function ChatInterface() {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isPlayingVocabAudio, setIsPlayingVocabAudio] = useState(false);
   const [vocabHeard, setVocabHeard] = useState(false); // Track if vocabulary has been heard
+  const [vocabAudioCache, setVocabAudioCache] = useState<string | null>(null); // Pre-generated audio for current vocabulary
+  const [isGeneratingVocabAudio, setIsGeneratingVocabAudio] = useState(false); // Track if audio is being generated
+  const [isVocabChallengeExpanded, setIsVocabChallengeExpanded] = useState(false); // Track if bonus challenge is expanded
+  const [vocabChallengeCompleted, setVocabChallengeCompleted] = useState(false); // Track if challenge is completed
+  const [showReturningUserOptions, setShowReturningUserOptions] = useState(isReturningUser && lastTopic); // Show options for returning users
+  const [showExitDialog, setShowExitDialog] = useState(false); // Track exit confirmation dialog
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const vocabAudioRef = useRef<HTMLAudioElement | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState({
-    line1: `Hi ${userName}! Welcome to ConvoBridge!`,
-    line2: "Select a topic to begin the mission."
+    line1: isReturningUser ? `Welcome back ${userName}!` : `Hi ${userName}! Welcome to ConvoBridge!`,
+    line2: isReturningUser && lastTopic ? "What would you like to do?" : "Select a topic to begin the mission."
   });
 
-  // Update welcome message when userName changes
+  // Update welcome message when userName or returning user status changes
   useEffect(() => {
-    setWelcomeMessage({
-      line1: `Hi ${userName}! Welcome to ConvoBridge!`,
-      line2: "Select a topic to begin the mission."
-    });
-  }, [userName]);
+    if (isReturningUser && lastTopic) {
+      setWelcomeMessage({
+        line1: `Welcome back ${userName}!`,
+        line2: "What would you like to do?"
+      });
+      setShowReturningUserOptions(true);
+    } else {
+      setWelcomeMessage({
+        line1: `Hi ${userName}! Welcome to ConvoBridge!`,
+        line2: "Select a topic to begin the mission."
+      });
+      setShowReturningUserOptions(false);
+    }
+  }, [userName, isReturningUser, lastTopic]);
 
   // Function to play audio from base64
   const playAudio = async (audioBase64: string) => {
@@ -181,31 +198,37 @@ export function ChatInterface() {
       setHearMeSayPointsAnimation(false);
     }, 1500);
     
-    // Combine word and definition for TTS
-    const vocabText = `${vocab.word}. ${vocab.definition}`;
-    
-    try {
-      const response = await fetch('http://localhost:8000/api/text_to_speech', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: vocabText,
-          voice: 'nova',
-          model: 'tts-1-hd',
-          format: 'mp3'
-        })
-      });
+    // Use cached audio if available, otherwise generate on-demand
+    if (vocabAudioCache) {
+      // Play cached audio immediately
+      await playVocabAudio(vocabAudioCache);
+    } else {
+      // Fallback: generate audio on-demand if cache is not ready
+      const vocabText = `${vocab.word}. ${vocab.definition}`;
+      
+      try {
+        const response = await fetch('http://localhost:8000/api/text_to_speech', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: vocabText,
+            voice: 'nova',
+            model: 'tts-1-hd',
+            format: 'mp3'
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to generate audio: ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Failed to generate audio: ${response.status}`);
+        }
+
+        const data = await response.json();
+        await playVocabAudio(data.audio_base64);
+      } catch (error) {
+        console.error("Error generating vocabulary audio:", error);
       }
-
-      const data = await response.json();
-      await playVocabAudio(data.audio_base64);
-    } catch (error) {
-      console.error("Error generating vocabulary audio:", error);
     }
   };
 
@@ -236,6 +259,7 @@ export function ChatInterface() {
   const [continueChatPointsAnimation, setContinueChatPointsAnimation] = useState<boolean>(false);
   const [hearMeSayPointsAnimation, setHearMeSayPointsAnimation] = useState<boolean>(false);
   const [vocabPracticePointsAnimation, setVocabPracticePointsAnimation] = useState<boolean>(false);
+  const [vocabChallengePointsAnimation, setVocabChallengePointsAnimation] = useState<boolean>(false);
   
   // Vocabulary Practice State
   const [isPracticingVocab, setIsPracticingVocab] = useState(false);
@@ -250,6 +274,18 @@ export function ChatInterface() {
   const vocabPracticeStreamRef = useRef<MediaStream | null>(null);
   const vocabPracticeStartTimeRef = useRef<number | null>(null);
   const vocabPracticeDurationRef = useRef<number>(0);
+
+  // Vocabulary Bonus Challenge State
+  const [isVocabChallengeRecording, setIsVocabChallengeRecording] = useState(false);
+  const [vocabChallengeTime, setVocabChallengeTime] = useState(0);
+  const [vocabChallengeError, setVocabChallengeError] = useState<string | null>(null);
+  const [isUploadingVocabChallenge, setIsUploadingVocabChallenge] = useState(false);
+  const vocabChallengeMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const vocabChallengeAudioChunksRef = useRef<Blob[]>([]);
+  const vocabChallengeTimerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const vocabChallengeStreamRef = useRef<MediaStream | null>(null);
+  const vocabChallengeStartTimeRef = useRef<number | null>(null);
+  const vocabChallengeDurationRef = useRef<number>(0);
 
   // Function to award brownie points
   const awardBrowniePoints = (points: number) => {
@@ -294,6 +330,59 @@ export function ChatInterface() {
     definition: 'An important assignment given to a person or group.',
     example: 'Your mission is to choose a topic.'
   });
+
+  // Pre-generate vocabulary audio when vocabulary changes
+  useEffect(() => {
+    // Clear previous cache when vocab changes
+    setVocabAudioCache(null);
+    
+    // Only generate if we have both word and definition
+    if (!vocab.word || !vocab.definition) {
+      return;
+    }
+    
+    // Generate audio in the background
+    const generateVocabAudio = async () => {
+      setIsGeneratingVocabAudio(true);
+      const vocabText = `${vocab.word}. ${vocab.definition}`;
+      
+      try {
+        const response = await fetch('http://localhost:8000/api/text_to_speech', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: vocabText,
+            voice: 'nova',
+            model: 'tts-1-hd',
+            format: 'mp3'
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Cache the audio for instant playback
+          setVocabAudioCache(data.audio_base64);
+          console.log(`[Vocab Audio] Pre-generated audio for: ${vocab.word}`);
+        } else {
+          console.error(`Failed to pre-generate vocab audio: ${response.status}`);
+        }
+      } catch (error) {
+        console.error("Error pre-generating vocabulary audio:", error);
+      } finally {
+        setIsGeneratingVocabAudio(false);
+      }
+    };
+    
+    // Generate audio after a short delay to avoid blocking the UI
+    const timeoutId = setTimeout(generateVocabAudio, 100);
+    
+    // Cleanup: cancel generation if vocab changes again
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [vocab.word, vocab.definition]);
 
   // Speech Analysis State
   const [speechAnalysis, setSpeechAnalysis] = useState<{
@@ -435,7 +524,8 @@ export function ChatInterface() {
               topic: currentTopic,
               turn_id: questionData.turn_id, // Pass turn_id to save response options and vocabulary
               difficulty_level: 1,
-              dimension: questionData.dimension || "Basic Preferences"
+              dimension: questionData.dimension || "Basic Preferences",
+              user_response: userResponse  // Pass the user's previous response for context-aware options
             })
           });
 
@@ -481,6 +571,58 @@ export function ChatInterface() {
       console.error("Failed to generate follow-up question", error);
       setIsLoading(false);
     }
+  };
+
+  // Handler to stop/change topic
+  const handleStopOrChangeTopic = () => {
+    setCurrentTopic(null);
+    setQuestion("");
+    setPreviousQuestion(null);
+    setQuestionAudio(null);
+    setResponses([]);
+    setSpeechAnalysis(null);
+    setSelectedResponse(null);
+    setCurrentTurnId(null);
+    setPreviousTurnId(null);
+    setWelcomeMessage({
+      line1: `Hi ${userName}! Select a topic to continue.`,
+      line2: ""
+    });
+  };
+
+  // Handler for Stop/Exit button - show confirmation dialog
+  const handleStopExitClick = () => {
+    setShowExitDialog(true);
+  };
+
+  // Handler for exit confirmation - Yes (logout and go to home)
+  const handleExitConfirm = async () => {
+    try {
+      // Call logout API endpoint to save exit timestamp
+      if (userId) {
+        await fetch('http://localhost:8000/api/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            session_id: sessionId || null
+          })
+        });
+      }
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Continue with logout even if API call fails
+    } finally {
+      // Redirect to home page
+      router.push('/');
+    }
+  };
+
+  // Handler for exit confirmation - No (continue chat)
+  const handleExitCancel = () => {
+    setShowExitDialog(false);
   };
 
   const handleTopicSelect = async (topicId: string) => {
@@ -789,6 +931,9 @@ export function ChatInterface() {
         setVocabHeard(false);
         // Reset user rephrased sentence when new speech analysis appears
         setUserRephrasedSentence("");
+        // Reset and auto-expand vocabulary bonus challenge when speech analysis appears
+        setVocabChallengeCompleted(false);
+        setIsVocabChallengeExpanded(true);
         // Generate rephrased sentence for vocabulary bonus challenge (as suggestion)
         if (result.transcript && vocab.word) {
           const rephrased = generateRephrasedSentence(result.transcript, vocab.word);
@@ -1000,6 +1145,161 @@ export function ChatInterface() {
     }
   };
 
+  // Vocabulary Bonus Challenge Recording Functions
+  const startVocabChallenge = async () => {
+    try {
+      setVocabChallengeError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      vocabChallengeStreamRef.current = stream;
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      vocabChallengeMediaRecorderRef.current = mediaRecorder;
+      vocabChallengeAudioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          vocabChallengeAudioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (vocabChallengeStartTimeRef.current) {
+          vocabChallengeDurationRef.current = Math.floor((Date.now() - vocabChallengeStartTimeRef.current) / 1000);
+        }
+        
+        const audioBlob = new Blob(vocabChallengeAudioChunksRef.current, { type: 'audio/webm' });
+        await handleVocabChallengeUpload(audioBlob);
+        
+        if (vocabChallengeStreamRef.current) {
+          vocabChallengeStreamRef.current.getTracks().forEach(track => track.stop());
+          vocabChallengeStreamRef.current = null;
+        }
+        vocabChallengeStartTimeRef.current = null;
+      };
+
+      mediaRecorder.start();
+      setIsVocabChallengeRecording(true);
+      setVocabChallengeTime(0);
+      vocabChallengeStartTimeRef.current = Date.now();
+      vocabChallengeDurationRef.current = 0;
+
+      vocabChallengeTimerIntervalRef.current = setInterval(() => {
+        setVocabChallengeTime((prev) => {
+          const newTime = prev + 1;
+          if (newTime >= 15) {
+            stopVocabChallenge();
+          }
+          return newTime;
+        });
+      }, 1000);
+
+    } catch (error: any) {
+      console.error("Error starting vocabulary challenge recording:", error);
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setVocabChallengeError("Microphone permission denied. Please allow microphone access.");
+      } else {
+        setVocabChallengeError("Failed to start recording. Please try again.");
+      }
+      setIsVocabChallengeRecording(false);
+    }
+  };
+
+  const stopVocabChallenge = () => {
+    if (vocabChallengeMediaRecorderRef.current && isVocabChallengeRecording) {
+      if (vocabChallengeStartTimeRef.current) {
+        vocabChallengeDurationRef.current = Math.floor((Date.now() - vocabChallengeStartTimeRef.current) / 1000);
+      }
+      
+      vocabChallengeMediaRecorderRef.current.stop();
+      setIsVocabChallengeRecording(false);
+      
+      if (vocabChallengeTimerIntervalRef.current) {
+        clearInterval(vocabChallengeTimerIntervalRef.current);
+        vocabChallengeTimerIntervalRef.current = null;
+      }
+    }
+  };
+
+  const handleVocabChallengeUpload = async (audioBlob: Blob) => {
+    const duration = vocabChallengeDurationRef.current || vocabChallengeTime;
+    
+    if (duration < 1) {
+      setVocabChallengeError("Recording too short. Please record for at least 1 second.");
+      setVocabChallengeTime(0);
+      vocabChallengeDurationRef.current = 0;
+      return;
+    }
+
+    setIsUploadingVocabChallenge(true);
+    setVocabChallengeError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'vocab_challenge.webm');
+      
+      // Don't include expected_response - we just want to verify they used the word
+      // The backend can check if the word appears in the transcript
+
+      const response = await fetch('http://localhost:8000/api/process-audio', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to process audio';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.detail || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      console.log('Vocabulary challenge audio processed:', result);
+      
+      // Check if the vocabulary word appears in the transcript (case-insensitive)
+      const transcript = result.transcript || '';
+      const vocabWordLower = vocab.word.toLowerCase();
+      const transcriptLower = transcript.toLowerCase();
+      
+      if (transcriptLower.includes(vocabWordLower)) {
+        // Award 20 points for completing vocabulary bonus challenge
+        setBrowniePoints(prev => {
+          const newTotal = prev + 20;
+          localStorage.setItem(`browniePoints_${userId}`, newTotal.toString());
+          return newTotal;
+        });
+        setVocabChallengePointsAnimation(true);
+        setVocabChallengeCompleted(true);
+        setVocabChallengeError(null);
+        setTimeout(() => {
+          setVocabChallengePointsAnimation(false);
+        }, 1500);
+      } else {
+        setVocabChallengeError(`Please use the word "${vocab.word}" in your sentence.`);
+      }
+      
+      setVocabChallengeTime(0);
+      vocabChallengeDurationRef.current = 0;
+      
+    } catch (error: any) {
+      console.error("Error uploading vocabulary challenge audio:", error);
+      const errorMessage = error.message || "Failed to upload audio. Please try again.";
+      setVocabChallengeError(errorMessage);
+      
+      if (error.message?.includes('fetch') || error.message?.includes('Failed to fetch')) {
+        setVocabChallengeError("Cannot connect to server. Please ensure the backend is running on port 8000.");
+      }
+    } finally {
+      setIsUploadingVocabChallenge(false);
+    }
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1018,6 +1318,12 @@ export function ChatInterface() {
       }
       if (vocabPracticeStreamRef.current) {
         vocabPracticeStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (vocabChallengeTimerIntervalRef.current) {
+        clearInterval(vocabChallengeTimerIntervalRef.current);
+      }
+      if (vocabChallengeStreamRef.current) {
+        vocabChallengeStreamRef.current.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
@@ -1042,27 +1348,43 @@ export function ChatInterface() {
                 ⚠️ Please log in to start a conversation. Redirecting...
               </div>
             )}
-            {TOPICS.map((topic) => (
-              <button 
-                key={topic.id}
-                onClick={() => handleTopicSelect(topic.id)}
-                disabled={!sessionId}
-                className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-300 font-medium text-lg relative overflow-hidden group ${
-                  !sessionId
-                    ? 'opacity-50 cursor-not-allowed'
-                    : currentTopic === topic.id 
-                    ? 'bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)]' 
-                    : 'bg-white/5 border-white/10 text-gray-300 hover:bg-copper/10 hover:border-copper hover:text-white'
-                }`}
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  {topic.label}
-                  {currentTopic === topic.id && <Activity className="w-4 h-4 text-cyan animate-pulse" />}
-                </div>
-                {/* Active Indicator Bar */}
-                {currentTopic === topic.id && <div className="absolute left-0 top-0 h-full w-1 bg-cyan"></div>}
-              </button>
-            ))}
+            {TOPICS.map((topic) => {
+              // Check if conversation is in progress (currentTopic is set and question exists)
+              const isConversationInProgress = currentTopic && question;
+              // Disable ALL topics when conversation is in progress (including the current one)
+              const isDisabled = !sessionId || isConversationInProgress;
+              const isCurrentTopic = currentTopic === topic.id;
+              
+              return (
+                <button 
+                  key={topic.id}
+                  onClick={() => {
+                    // Prevent any action when conversation is in progress
+                    if (isConversationInProgress) {
+                      return;
+                    }
+                    handleTopicSelect(topic.id);
+                  }}
+                  disabled={isDisabled}
+                  className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-300 font-medium text-lg relative overflow-hidden group ${
+                    isDisabled
+                      ? isCurrentTopic
+                        ? 'opacity-70 cursor-not-allowed bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)]'
+                        : 'opacity-50 cursor-not-allowed'
+                      : isCurrentTopic 
+                      ? 'bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)]' 
+                      : 'bg-white/5 border-white/10 text-gray-300 hover:bg-copper/10 hover:border-copper hover:text-white'
+                  }`}
+                >
+                  <div className="relative z-10 flex items-center justify-between">
+                    {topic.label}
+                    {isCurrentTopic && <Activity className="w-4 h-4 text-cyan animate-pulse" />}
+                  </div>
+                  {/* Active Indicator Bar */}
+                  {isCurrentTopic && <div className="absolute left-0 top-0 h-full w-1 bg-cyan"></div>}
+                </button>
+              );
+            })}
           </div>
 
           {/* Brownie Points Window - Below Topics */}
@@ -1134,20 +1456,6 @@ export function ChatInterface() {
              <div className="relative z-10 p-6 rounded-2xl rounded-tl-none bg-black/60 backdrop-blur-xl border border-cyan/30 shadow-[0_0_30px_rgba(0,229,255,0.15)] flex flex-col gap-3 min-h-[150px]">
                 <div className="flex justify-between items-start">
                     <span className="text-cyan font-mono text-xs tracking-widest uppercase mb-2">Agent Message</span>
-                    {question && (
-                      <button 
-                        onClick={handleListenClick}
-                        disabled={isPlayingAudio}
-                        className={`p-1.5 rounded-full transition-colors ${
-                          isPlayingAudio 
-                            ? 'bg-cyan/20 text-cyan animate-pulse' 
-                            : 'hover:bg-white/10 text-cyan hover:text-white'
-                        }`}
-                        title="Listen to question"
-                      >
-                        <Volume2 className="w-4 h-4" />
-                      </button>
-                    )}
                 </div>
                 
                 {isLoading ? (
@@ -1159,13 +1467,76 @@ export function ChatInterface() {
                   </div>
                 ) : (
                   <div className="text-lg md:text-xl text-white font-light leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    {welcomeMessage.line1 ? (
+                    {speechAnalysis ? (
+                      // Show feedback message in Agent Message window when speech analysis is displayed
+                      <div className="bg-cyan/10 p-6 rounded-lg border border-cyan/30">
+                        <p className="text-white text-lg leading-relaxed flex items-center gap-2">
+                          <span>{speechAnalysis.feedback}</span>
+                          <Trophy className="w-6 h-6 text-yellow-400 flex-shrink-0" />
+                        </p>
+                      </div>
+                    ) : welcomeMessage.line1 ? (
                       <div className="flex flex-col gap-4">
                         <div className="flex items-center gap-3">
                            <span className="tracking-wide">{welcomeMessage.line1}</span>
                            <Activity className="w-5 h-5 text-cyan animate-pulse" />
                         </div>
                         <span className="text-gray-300 text-base tracking-wide">{welcomeMessage.line2}</span>
+                        
+                        {/* Returning User Options */}
+                        {showReturningUserOptions && lastTopic && (
+                          <div className="flex flex-col gap-3 mt-4">
+                            <button
+                              onClick={() => {
+                                setShowReturningUserOptions(false);
+                                setWelcomeMessage({ line1: "", line2: "" });
+                                // User can now select a topic normally
+                              }}
+                              className="w-full px-6 py-4 rounded-xl bg-copper/10 border border-copper/30 text-white font-medium hover:bg-copper/20 hover:border-copper hover:shadow-[0_0_15px_rgba(255,107,53,0.3)] transition-all duration-300 text-left"
+                            >
+                              Pick a new topic
+                            </button>
+                            <button
+                              onClick={async () => {
+                                setShowReturningUserOptions(false);
+                                setIsLoading(true);
+                                try {
+                                  // Get previous topic state
+                                  const stateRes = await fetch('http://localhost:8000/api/get_previous_topic_state', {
+                                    method: 'POST',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                      user_id: userId,
+                                      topic_name: lastTopic
+                                    })
+                                  });
+                                  
+                                  if (!stateRes.ok) {
+                                    throw new Error(`Failed to get previous topic state: ${stateRes.status}`);
+                                  }
+                                  
+                                  const stateData = await stateRes.json();
+                                  
+                                  // Continue with the previous topic
+                                  // Find the topic ID from the topic name
+                                  const topicId = TOPICS.find(t => t.label.toLowerCase() === lastTopic.toLowerCase())?.id || lastTopic.toLowerCase();
+                                  await handleTopicSelect(topicId);
+                                } catch (error) {
+                                  console.error("Error continuing previous topic:", error);
+                                  setIsLoading(false);
+                                  // Fallback: just hide options and let user pick a new topic
+                                  setShowReturningUserOptions(false);
+                                  setWelcomeMessage({ line1: "", line2: "" });
+                                }
+                              }}
+                              className="w-full px-6 py-4 rounded-xl bg-cyan/10 border border-cyan/30 text-cyan font-medium hover:bg-cyan/20 hover:border-cyan hover:shadow-[0_0_15px_rgba(0,229,255,0.3)] transition-all duration-300 text-left"
+                            >
+                              Continue previous topic: {lastTopic}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="whitespace-pre-line leading-relaxed">
@@ -1180,19 +1551,17 @@ export function ChatInterface() {
 
         {/* Speech Analysis Feedback Window */}
         {speechAnalysis && (
-          <div className="w-full max-w-4xl flex flex-col gap-6 mt-8">
+          <div className="w-full max-w-2xl flex flex-col gap-4 mt-8">
             <div className="p-6 rounded-2xl bg-black/60 backdrop-blur-xl border border-cyan/30 shadow-[0_0_40px_rgba(0,229,255,0.2)] animate-in fade-in slide-in-from-bottom-4">
               <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
-                <h3 className="text-cyan font-mono text-sm tracking-widest uppercase">Speech Analysis Feedback</h3>
+                <h3 className="text-cyan font-mono text-sm tracking-widest uppercase">Speech Analysis</h3>
               </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Column: Metrics */}
               <div className="flex flex-col gap-4">
                 {/* Transcript */}
                 <div>
                   <h4 className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-2">Transcript</h4>
-                  <p className="text-white text-sm bg-white/5 p-3 rounded-lg border border-white/10 italic">
+                  <p className="text-white text-base bg-white/10 p-4 rounded-lg border border-white/20 italic font-medium">
                     "{speechAnalysis.transcript}"
                   </p>
                 </div>
@@ -1201,8 +1570,8 @@ export function ChatInterface() {
                 <div className="grid grid-cols-2 gap-3">
                   {/* Clarity Score */}
                   <div className="relative p-3 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-1">Clarity</div>
-                    <div className="text-2xl font-bold text-cyan">
+                    <div className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-1.5">Clarity</div>
+                    <div className="text-2xl font-bold text-copper">
                       {Math.round(speechAnalysis.clarity_score * 100)}%
                     </div>
                     <div className="w-full h-2 bg-white/10 rounded-full mt-2 overflow-hidden">
@@ -1214,7 +1583,7 @@ export function ChatInterface() {
                     {/* Points Animation - appears near clarity score when 100% */}
                     {clarityPointsAnimation && speechAnalysis.clarity_score === 1.0 && (
                       <div className="absolute -top-2 -right-2 flex items-center justify-center pointer-events-none z-20">
-                        <div className="text-3xl font-bold text-yellow-400 animate-bounce drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]">
+                        <div className="text-2xl font-bold text-yellow-400 animate-bounce drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]">
                           +10
                         </div>
                       </div>
@@ -1223,7 +1592,7 @@ export function ChatInterface() {
 
                   {/* Pace */}
                   <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-1">Pace</div>
+                    <div className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-1.5">Pace</div>
                     <div className="text-2xl font-bold text-copper">
                       {speechAnalysis.pace_wpm}
                     </div>
@@ -1245,58 +1614,53 @@ export function ChatInterface() {
                   </div>
                 )}
               </div>
+            </div>
 
-              {/* Right Column: Feedback */}
-              <div className="flex flex-col gap-3">
-                {/* Feedback Message */}
-                <div>
-                  <h4 className="text-xs font-mono text-gray-400 uppercase tracking-widest mb-3">Feedback</h4>
-                  <div className="bg-cyan/10 p-6 rounded-lg border border-cyan/30">
-                    <p className="text-white text-lg leading-relaxed flex items-center gap-2">
-                      <span>{speechAnalysis.feedback}</span>
-                      <Trophy className="w-6 h-6 text-yellow-400 flex-shrink-0" />
-                    </p>
-                  </div>
+            {/* Action Buttons: Stop, Change Topic, Continue Chat */}
+            <div className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 mt-12">
+              {/* Left Side: Stop / Exit and Change Topic */}
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                {/* Stop / Exit Button */}
+                <div className="relative">
+                  <button
+                    onClick={handleStopExitClick}
+                    className="px-6 py-3 rounded-xl bg-black border-2 border-cyan/50 text-gray-400 font-bold text-sm hover:bg-black/80 hover:border-cyan hover:text-gray-300 hover:shadow-[0_0_20px_rgba(0,229,255,0.4)] transition-all duration-300 flex items-center justify-center gap-2 group whitespace-nowrap"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Stop / Exit</span>
+                  </button>
                 </div>
 
-                {/* Suggestions */}
-                {speechAnalysis.suggestions.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-mono text-copper uppercase tracking-widest mb-2 flex items-center gap-2">
-                      <span className="w-2 h-2 bg-copper rounded-full"></span>
-                      Suggestions
-                    </h4>
-                    <ul className="space-y-2">
-                      {speechAnalysis.suggestions.map((suggestion, i) => (
-                        <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                          <span className="text-copper mt-1">→</span>
-                          <span>{suggestion}</span>
-                        </li>
-                      ))}
-                    </ul>
+                {/* Change Topic Button */}
+                <div className="relative">
+                  <button
+                    onClick={handleStopOrChangeTopic}
+                    className="px-6 py-3 rounded-xl bg-black border-2 border-cyan/50 text-gray-400 font-bold text-sm hover:bg-black/80 hover:border-cyan hover:text-gray-300 hover:shadow-[0_0_20px_rgba(0,229,255,0.4)] transition-all duration-300 flex items-center justify-center gap-2 group whitespace-nowrap"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Change Topic</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Side: Continue Chat Button */}
+              <div className="relative ml-auto">
+                <button
+                  onClick={handleContinueChat}
+                  className="px-8 py-4 rounded-xl bg-cyan/10 border-2 border-cyan/70 text-cyan font-bold text-base hover:bg-cyan/20 hover:border-cyan hover:text-cyan shadow-[0_0_25px_rgba(0,229,255,0.5)] hover:shadow-[0_0_35px_rgba(0,229,255,0.7)] transition-all duration-300 flex items-center justify-center gap-2 group whitespace-nowrap animate-pulse"
+                >
+                  <span>Continue Chat</span>
+                  <Star className="w-5 h-5 text-cyan fill-cyan/50 group-hover:animate-pulse" />
+                </button>
+                {/* Points Animation - appears near Continue Chat button */}
+                {continueChatPointsAnimation && (
+                  <div className="absolute -top-3 -right-3 flex items-center justify-center pointer-events-none z-50">
+                    <div className="text-3xl font-bold text-yellow-400 animate-bounce drop-shadow-[0_0_20px_rgba(250,204,21,0.9)]">
+                      +5
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-            </div>
-
-            {/* Continue Chat Button */}
-            <div className="relative w-full max-w-md mx-auto">
-              <button
-                onClick={handleContinueChat}
-                className="w-full px-8 py-4 rounded-xl bg-copper/20 border-2 border-copper text-white font-bold text-lg hover:bg-copper/30 hover:border-copper hover:shadow-[0_0_30px_rgba(255,107,53,0.6)] transition-all duration-300 flex items-center justify-center gap-3 group"
-              >
-                <span>Continue Chat</span>
-                <Star className="w-5 h-5 text-cyan fill-cyan/30 group-hover:animate-pulse" />
-              </button>
-              {/* Points Animation - appears near Continue Chat button */}
-              {continueChatPointsAnimation && (
-                <div className="absolute -top-4 -right-4 flex items-center justify-center pointer-events-none z-50">
-                  <div className="text-4xl font-bold text-yellow-400 animate-bounce drop-shadow-[0_0_20px_rgba(250,204,21,0.9)]">
-                    +5
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -1420,19 +1784,23 @@ export function ChatInterface() {
                 <div className="relative mt-4">
                     <button 
                         onClick={handleVocabListenClick}
-                        disabled={isPlayingVocabAudio}
+                        disabled={isPlayingVocabAudio || isGeneratingVocabAudio}
                         className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg border transition-all duration-300 group ${
                             isPlayingVocabAudio
                                 ? 'bg-copper/20 border-copper text-white shadow-[0_0_15px_rgba(255,107,53,0.4)] animate-pulse'
+                                : isGeneratingVocabAudio
+                                ? 'bg-copper/10 border-copper/30 text-copper/70 cursor-wait'
                                 : speechAnalysis && !vocabHeard
                                 ? 'bg-copper/20 border-copper text-white shadow-[0_0_20px_rgba(255,107,53,0.6)] animate-pulse'
                                 : 'bg-copper/10 border-copper/30 text-copper hover:bg-copper/20 hover:border-copper hover:text-white hover:shadow-[0_0_15px_rgba(255,107,53,0.2)]'
                         }`}
-                        title="Hear word and definition"
+                        title={isGeneratingVocabAudio ? "Preparing audio..." : "Hear word and definition"}
                     >
-                        <Volume2 className={`w-4 h-4 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard)) ? 'animate-pulse' : 'group-hover:scale-110'} transition-transform`} />
-                        <span className="text-xs font-bold tracking-widest uppercase">Hear me say</span>
-                        <Star className={`w-4 h-4 text-cyan fill-cyan/30 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard)) ? 'animate-pulse' : ''}`} />
+                        <Volume2 className={`w-4 h-4 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard)) ? 'animate-pulse' : isGeneratingVocabAudio ? 'animate-spin' : 'group-hover:scale-110'} transition-transform`} />
+                        <span className="text-xs font-bold tracking-widest uppercase">
+                            {isGeneratingVocabAudio ? 'Preparing...' : 'Hear me say'}
+                        </span>
+                        <Star className={`w-4 h-4 text-cyan fill-cyan/30 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard) || isGeneratingVocabAudio) ? 'animate-pulse' : ''}`} />
                     </button>
               {/* Points Animation - appears near Hear me say button */}
               {hearMeSayPointsAnimation && (
@@ -1443,10 +1811,145 @@ export function ChatInterface() {
                 </div>
               )}
                 </div>
+
+                {/* Vocabulary Bonus Challenge - Expandable Section */}
+                {speechAnalysis && !vocabChallengeCompleted && (
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    {/* Challenge Header - Clickable to expand/collapse */}
+                    <button
+                      onClick={() => setIsVocabChallengeExpanded(!isVocabChallengeExpanded)}
+                      className="w-full flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-cyan/10 to-purple-500/10 border border-cyan/30 hover:border-cyan/50 transition-all duration-300 group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-cyan animate-pulse" />
+                        <span className="text-xs font-bold tracking-widest uppercase text-cyan">
+                          Bonus Challenge
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-yellow-400/20 text-yellow-400 text-xs font-bold">
+                          +20
+                        </span>
+                      </div>
+                      {isVocabChallengeExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-cyan group-hover:scale-110 transition-transform" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-cyan group-hover:scale-110 transition-transform" />
+                      )}
+                    </button>
+
+                    {/* Expandable Challenge Content */}
+                    {isVocabChallengeExpanded && (
+                      <div className="mt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <p className="text-sm text-gray-300 leading-relaxed">
+                          Record your own sentence using the word <span className="font-bold text-cyan">"{vocab.word}"</span>
+                        </p>
+
+                        {/* Error Message */}
+                        {vocabChallengeError && (
+                          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono animate-in fade-in slide-in-from-top-2">
+                            {vocabChallengeError}
+                          </div>
+                        )}
+
+                        {/* Recording Timer */}
+                        {isVocabChallengeRecording && (
+                          <div className="text-center">
+                            <div className="text-xl font-mono font-bold text-cyan drop-shadow-[0_0_10px_rgba(0,229,255,0.6)] animate-pulse">
+                              {formatTime(vocabChallengeTime)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Record Button */}
+                        <div className="relative">
+                          <button
+                            onClick={isVocabChallengeRecording ? stopVocabChallenge : startVocabChallenge}
+                            disabled={isUploadingVocabChallenge}
+                            className={`w-full relative flex items-center justify-center gap-2 px-4 py-3 rounded-lg border transition-all duration-300 ${
+                              isVocabChallengeRecording
+                                ? 'bg-red-500/20 border-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse'
+                                : vocabChallengeCompleted
+                                ? 'bg-green-500/20 border-green-500 text-green-400 cursor-default'
+                                : 'bg-cyan/10 border-cyan/30 text-cyan hover:bg-cyan/20 hover:border-cyan hover:shadow-[0_0_15px_rgba(0,229,255,0.3)]'
+                            } ${isUploadingVocabChallenge ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {isVocabChallengeRecording ? (
+                              <>
+                                <Circle className="absolute w-full h-full text-red-500 animate-ping opacity-75" />
+                                <div className="relative z-10 w-6 h-6 rounded bg-red-500"></div>
+                                <span className="text-xs font-bold tracking-widest uppercase">Stop Recording</span>
+                              </>
+                            ) : vocabChallengeCompleted ? (
+                              <>
+                                <Trophy className="w-4 h-4" />
+                                <span className="text-xs font-bold tracking-widest uppercase">Challenge Completed!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Mic className="w-4 h-4" />
+                                <span className="text-xs font-bold tracking-widest uppercase">Start Recording</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* Points Animation */}
+                          {vocabChallengePointsAnimation && (
+                            <div className="absolute -top-2 -right-2 flex items-center justify-center pointer-events-none z-20">
+                              <div className="text-3xl font-bold text-yellow-400 animate-bounce drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]">
+                                +20
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Uploading Indicator */}
+                        {isUploadingVocabChallenge && (
+                          <div className="flex items-center justify-center gap-2 text-cyan animate-pulse">
+                            <Activity className="w-4 h-4" />
+                            <span className="text-xs font-mono uppercase">Processing...</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
         </div>
 
       </div>
+
+      {/* Exit Confirmation Dialog */}
+      {showExitDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="relative w-full max-w-md mx-4 p-6 rounded-2xl bg-black/90 backdrop-blur-xl border-2 border-cyan/50 shadow-[0_0_40px_rgba(0,229,255,0.3)] animate-in fade-in slide-in-from-bottom-4">
+            <div className="flex flex-col gap-6">
+              {/* Dialog Title */}
+              <div className="text-center">
+                <h3 className="text-xl font-bold text-white mb-2">Exit Confirmation</h3>
+                <p className="text-gray-300 text-base">Are you sure you want to exit?</p>
+              </div>
+
+              {/* Dialog Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                {/* No Button - Continue Chat */}
+                <button
+                  onClick={handleExitCancel}
+                  className="flex-1 px-6 py-3 rounded-xl bg-white/10 border-2 border-white/20 text-white font-medium text-base hover:bg-white/30 hover:border-white/60 hover:text-white hover:shadow-[0_0_25px_rgba(255,255,255,0.4)] transition-all duration-300 transform hover:scale-105"
+                >
+                  No
+                </button>
+
+                {/* Yes Button - Exit */}
+                <button
+                  onClick={handleExitConfirm}
+                  className="flex-1 px-6 py-3 rounded-xl bg-cyan/20 border-2 border-cyan/50 text-cyan font-medium text-base hover:bg-cyan/40 hover:border-cyan hover:text-cyan hover:shadow-[0_0_25px_rgba(0,229,255,0.6)] transition-all duration-300 transform hover:scale-105"
+                >
+                  Yes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

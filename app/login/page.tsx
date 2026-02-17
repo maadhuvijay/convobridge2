@@ -36,7 +36,7 @@ export default function LoginPage() {
           alert('Warning: Session ID not created. This may be because Supabase is not configured. Please check your backend configuration.');
         }
         
-        // Pass the username, user_id, and session_id via query parameters
+        // Pass the username, user_id, session_id, and returning user info via query parameters
         const params = new URLSearchParams({
           user: name.trim(),
           userId: loginData.user_id || ''
@@ -46,11 +46,20 @@ export default function LoginPage() {
         } else {
           console.warn('No session_id in login response - user will be redirected to login when trying to start conversation');
         }
+        // Add returning user information
+        if (loginData.is_returning_user) {
+          params.append('isReturningUser', 'true');
+        }
+        if (loginData.last_topic) {
+          params.append('lastTopic', loginData.last_topic);
+        }
         
         console.log('Login successful, navigating with params:', {
           user: name.trim(),
           userId: loginData.user_id,
           sessionId: loginData.session_id,
+          isReturningUser: loginData.is_returning_user,
+          lastTopic: loginData.last_topic,
           fullResponse: loginData
         });
         

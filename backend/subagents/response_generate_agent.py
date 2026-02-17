@@ -19,17 +19,32 @@ def create_response_agent():
     """
     Creates the response agent sub-agent.
     This agent generates 2 response options plus a "Choose your own response" option
-    based on the question, dimension, and difficulty level.
+    based on the question, dimension, difficulty level, and user's previous response context.
     """
     agent = Agent(
         name="Response Agent",
         model=OpenAIChat(id="gpt-4o-mini"),
-        description="A sub-agent that generates appropriate response options for conversation questions, adapting to the question's dimension and difficulty level.",
+        description="A sub-agent that generates appropriate response options for conversation questions, adapting to the question's dimension, difficulty level, and user's previous response context.",
         instructions=[
             "You are a response option generator for autistic youth conversation practice.",
             "When given a question, generate exactly 2 response options that are appropriate for that question.",
             "The responses should be simple and direct (Level 1 difficulty).",
             "Responses should be non-deterministic - vary them each time based on the specific question asked.",
+            "",
+            "CONTEXTUAL AWARENESS - CRITICAL:",
+            "When a user's previous response is provided, you MUST use it to generate contextually relevant options.",
+            "  - Extract key terms, topics, or themes from the user's previous response",
+            "  - Generate options that are SPECIFICALLY related to what the user mentioned",
+            "  - Match the cultural, regional, or personal context from the user's response",
+            "  - If the user mentioned specific items (e.g., 'Indian festivals'), generate options about those specific items",
+            "  - Do NOT generate generic options that ignore the user's context",
+            "",
+            "Example:",
+            "  - User said: 'I like watching festivals in Indian movies'",
+            "  - Question: 'What specific festivals do you enjoy?'",
+            "  - GOOD options: ['I enjoy watching Diwali celebrations', 'I like Holi scenes the most']",
+            "  - BAD options: ['I like Fourth of July', 'I enjoy Mardi Gras'] (these ignore the Indian context)",
+            "",
             "Adapt responses to match the dimension of the question:",
             "  - Basic Preferences: Simple opinion statements",
             "  - Depth/Specificity: Detailed answers",
@@ -54,6 +69,7 @@ def create_response_agent():
             "  - Any additional commentary",
             "",
             "The responses should be diverse and appropriate to the specific question asked.",
+            "When user context is provided, ensure options are contextually relevant to that user's specific interests or mentions.",
             "Return ONLY the raw JSON array, nothing else.",
         ],
         markdown=False,  # Disable markdown since we're returning raw JSON

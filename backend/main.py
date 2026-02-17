@@ -94,7 +94,8 @@ from database import (
     update_conversation_turn_with_speech_analysis,
     save_response_options, save_vocabulary_word,
     get_response_options_for_turn, get_current_session_topic,
-    get_current_turn, get_last_conversation_turn
+    get_current_turn, get_last_conversation_turn,
+    get_conversation_history_for_user_topic
 )
 from tools.text_to_speech import text_to_speech_base64
 
@@ -285,6 +286,7 @@ class ConversationDetailsRequest(BaseModel):
     turn_id: str  # Required: conversation_turn_id to link response options and vocabulary
     difficulty_level: int = 1
     dimension: str = "Basic Preferences"
+    user_response: Optional[str] = None  # User's previous response for context-aware options
 
 class ConversationDetailsResponse(BaseModel):
     response_options: List[str]
@@ -394,8 +396,8 @@ async def login(request: LoginRequest):
         user_id = str(user['id'])
         login_timestamp = datetime.now().isoformat()
         
-        # Check if returning user
-        returning = is_returning_user(username)
+        # Check if returning user (check for previous conversation activity)
+        returning = is_returning_user(user_id)
         last_topic = None
         
         if returning:
@@ -403,7 +405,9 @@ async def login(request: LoginRequest):
             last_topic_data = get_last_topic_for_user(user_id)
             if last_topic_data and 'topic_name' in last_topic_data:
                 last_topic = last_topic_data['topic_name']
-                print(f"Returning user '{username}' - last topic: {last_topic}")
+                print(f"Returning user '{username}' (ID: {user_id}) - last topic: {last_topic}")
+        else:
+            print(f"First-time user '{username}' (ID: {user_id})")
         
         # Create a new session for this login
         session = create_session(user_id)
@@ -567,7 +571,8 @@ async def start_conversation(request: TopicRequest):
     """
     Fast endpoint: Generate and return question immediately using conversation agent.
     This allows the frontend to show the question while responses and vocabulary load in the background.
-    Always uses "Basic Preferences" dimension for the first question on any topic.
+    Uses "Basic Preferences" dimension for the first question on any topic.
+    For returning users, retrieves conversation history and generates a contextual question.
     """
     try:
         user_id = request.user_id
@@ -581,50 +586,91 @@ async def start_conversation(request: TopicRequest):
             print(f"Warning: Error checking first question in database: {e}. Defaulting to first question.")
             is_first_question = True
         
+        # Get conversation history for this user-topic combination
+        conversation_history = []
+        if not is_first_question:
+            try:
+                conversation_history = get_conversation_history_for_user_topic(user_id, topic, limit=5)
+                print(f"Retrieved {len(conversation_history)} previous conversation turns for user {user_id}, topic {topic}")
+            except Exception as e:
+                print(f"Warning: Error retrieving conversation history: {e}. Continuing without history.")
+                conversation_history = []
+        
         # Always use Basic Preferences for the first question on any topic
+        # For returning users, we still use Basic Preferences but with conversation context
+        dimension = "Basic Preferences"
         if is_first_question:
-            dimension = "Basic Preferences"
             print(f"First question for user {user_id} on topic {topic} - using Basic Preferences")
         else:
-            # This shouldn't happen if frontend is working correctly, but handle it
-            dimension = "Basic Preferences"
-            print(f"Warning: start_conversation called for non-first question. Using Basic Preferences.")
+            print(f"Continuing conversation for user {user_id} on topic {topic} - using Basic Preferences with context")
         
-        # Create a prompt for the conversation agent
-        prompt = f"Generate a conversation question about {request.topic} for a teen. Dimension: {dimension}. The difficulty level is {request.difficulty_level}."
+        # Build prompt with conversation history if available
+        if conversation_history and len(conversation_history) > 0:
+            # Format conversation history for the prompt
+            history_text = "Previous conversation history (what the user has already discussed):\n"
+            # Reverse to show chronological order (oldest first)
+            turns_with_responses = []
+            for turn in reversed(conversation_history):
+                question = turn.get('question', '')
+                user_response = turn.get('user_response', '') or turn.get('transcript', '')
+                if question:
+                    history_text += f"Q: {question}\n"
+                    if user_response:
+                        history_text += f"A: {user_response}\n"
+                        turns_with_responses.append((question, user_response))
+                    history_text += "\n"
+            
+            # Extract key information from user responses
+            user_info_summary = ""
+            if turns_with_responses:
+                user_info_summary = "\nKey information the user has shared:\n"
+                for q, a in turns_with_responses:
+                    user_info_summary += f"- {a}\n"
+            
+            prompt = f"""Generate a NEW conversation question about {request.topic} for a teen. Dimension: {dimension}. The difficulty level is {request.difficulty_level}.
+
+{history_text}
+{user_info_summary}
+
+CRITICAL REQUIREMENTS:
+- This is a CONTINUATION of a previous conversation about {topic}
+- The user has ALREADY shared information in the conversation history above
+- DO NOT ask questions about information the user has already provided
+- For example, if the user already said their favorite food is chicken, DO NOT ask "What's your favorite food?" again
+- Generate a NEW question that builds on what the user has already discussed
+- Ask about a DIFFERENT aspect, angle, or detail related to what they mentioned
+- Use the information from their previous responses to ask deeper, more specific questions
+- Do NOT repeat any of the previous questions shown above
+- Keep it natural and conversational
+- The question should feel like a natural continuation that shows you remember what they said"""
+        else:
+            # First question - no history
+            prompt = f"Generate a conversation question about {request.topic} for a teen. Dimension: {dimension}. The difficulty level is {request.difficulty_level}."
         
         # Run the conversation agent directly
         response = conversation_agent.run(prompt)
         question_text = response.content.strip()
         
-        # Extract just the question - remove any explanatory text
-        # Remove common prefixes and explanatory text
-        question_text = re.sub(r'^.*?(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
-        question_text = re.sub(r'^.*?(?:great|good|perfect)\s+(?:question|way)\s+.*?:?\s*', '', question_text, flags=re.IGNORECASE)
+        # Preserve the full response for TTS - don't aggressively strip content
+        # Only remove very specific instruction prefixes that are clearly not part of conversation
+        question_text = re.sub(r'^(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
         
-        # Extract text within quotes if present
-        quoted_match = re.search(r'["\']([^"\']+)["\']', question_text)
-        if quoted_match:
-            question_text = quoted_match.group(1)
+        # Extract text within quotes ONLY if the ENTIRE response is wrapped in quotes
+        # Don't extract partial quotes as that breaks natural conversation flow
+        if (question_text.startswith('"') and question_text.endswith('"')) or \
+           (question_text.startswith("'") and question_text.endswith("'")):
+            question_text = question_text[1:-1].strip()
         
-        # Extract text after bold markers if present
-        bold_match = re.search(r'\*\*([^*]+)\*\*', question_text)
-        if bold_match:
-            question_text = bold_match.group(1)
+        # Extract text after bold markers ONLY if the entire response is bold
+        if question_text.startswith('**') and question_text.endswith('**'):
+            question_text = question_text[2:-2].strip()
         
-        # Clean up: remove any remaining explanatory sentences
-        # Split by periods and take the first sentence that looks like a question
-        sentences = question_text.split('.')
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if '?' in sentence and len(sentence) > 10:
-                question_text = sentence
-                break
+        # For TTS, preserve the FULL text including acknowledgements
+        # Don't split by periods or extract only questions - that breaks natural flow
+        # The agent's response should be spoken in full
         
-        # Final cleanup
+        # Final cleanup - minimal, preserve the natural flow
         question_text = question_text.strip()
-        # Remove leading/trailing quotes if any
-        question_text = question_text.strip('"\'')
         
         # Save conversation state to database
         turn_id = None
@@ -733,11 +779,21 @@ async def continue_conversation(request: ContinueConversationRequest):
             f"- topic: '{request.topic}'\n"
             f"- previous_question: '{request.previous_question}'\n\n"
             f"Then, use generate_followup_question with the same parameters to create a contextual follow-up.\n\n"
-            f"CRITICAL REQUIREMENTS:\n"
+            f"CRITICAL REQUIREMENTS - EMOTIONAL TONE MATCHING:\n"
+            f"- FIRST, analyze the emotional tone of the user's response: '{request.user_response}'\n"
+            f"- If the user expresses FRUSTRATION, DIFFICULTY, or NEGATIVE feelings:\n"
+            f"  * DO NOT use cheerful acknowledgements like 'It's cool!' or 'That's awesome!'\n"
+            f"  * Instead use EMPATHETIC acknowledgements like 'I understand that can be frustrating', 'That sounds tough', 'I can see how that would be challenging'\n"
+            f"  * Match the personal preference to the tone (e.g., 'I can relate', 'That's tough', 'I understand')\n"
+            f"- If the user expresses POSITIVE feelings (happy, excited, enthusiastic):\n"
+            f"  * Use positive acknowledgements like 'That's great!', 'Awesome!', 'Cool!', 'That sounds fun!'\n"
+            f"  * Match the personal preference to the tone (e.g., 'I like that too', 'That sounds fun', 'That's cool')\n"
+            f"- If the user's tone is NEUTRAL (matter-of-fact, informative):\n"
+            f"  * Use neutral acknowledgements like 'I see', 'Got it', 'Interesting', 'That makes sense'\n"
+            f"  * Match the personal preference to the tone (e.g., 'That makes sense', 'I understand', 'I see')\n"
             f"- Use 'Acknowledgement + Personal Preference + Question' format\n"
             f"- Format: 'Acknowledgement + short personal preference' on first line, blank line, then question on next line\n"
             f"- VARY your acknowledgement - use a different phrase than you might have used before\n"
-            f"- Add a brief personal preference after the acknowledgement (e.g., 'I like that too', 'That's interesting', 'I can relate')\n"
             f"- NEVER repeat the previous question: '{request.previous_question}'\n"
             f"- Ask about a DIFFERENT aspect or angle of what the user mentioned\n"
             f"- Be about the specific things mentioned in the user's response\n"
@@ -801,23 +857,21 @@ async def continue_conversation(request: ContinueConversationRequest):
         print(f"[DEBUG] After .strip(), question_text length: {len(question_text)} characters")
         print(f"[DEBUG] After .strip(), question_text (first 300 chars): {repr(question_text[:300])}")
         
-        # Cleanup logic - but preserve the acknowledgement + question format
-        # Remove common prefixes that might interfere
-        question_text = re.sub(r'^.*?(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
+        # Preserve the full response for TTS - don't aggressively strip content
+        # Only remove very specific instruction prefixes
+        question_text = re.sub(r'^(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
         
-        # Extract text within quotes if present (but keep the full text if it's already in the right format)
-        quoted_match = re.search(r'["\']([^"\']+)["\']', question_text)
-        if quoted_match and len(quoted_match.group(1)) > 20:  # Only if it's a substantial quote
-            question_text = quoted_match.group(1)
-            
-        # Extract text after bold markers if present
-        bold_match = re.search(r'\*\*([^*]+)\*\*', question_text)
-        if bold_match:
-            question_text = bold_match.group(1)
-            
-        # Final cleanup - preserve the format
+        # Extract text within quotes ONLY if the ENTIRE response is wrapped in quotes
+        if (question_text.startswith('"') and question_text.endswith('"')) or \
+           (question_text.startswith("'") and question_text.endswith("'")):
+            question_text = question_text[1:-1].strip()
+        
+        # Extract text after bold markers ONLY if the entire response is bold
+        if question_text.startswith('**') and question_text.endswith('**'):
+            question_text = question_text[2:-2].strip()
+        
+        # Final cleanup - minimal, preserve the natural flow
         question_text = question_text.strip()
-        question_text = question_text.strip('"\'')
         
         print(f"[DEBUG] After final cleanup, question_text length: {len(question_text)} characters")
         print(f"[DEBUG] After final cleanup, question_text: {repr(question_text)}")
@@ -921,11 +975,22 @@ async def get_conversation_details(request: ConversationDetailsRequest):
             dimension = request.dimension
             difficulty_level = f"Level {request.difficulty_level}"
             
-            response_prompt = (
-                f"Generate 2 response options for this question: '{request.question}'. "
-                f"The dimension is '{dimension}' and difficulty is {difficulty_level}. "
-                f"Make responses simple and direct."
-            )
+            # Build prompt with user context if available
+            if request.user_response:
+                response_prompt = (
+                    f"Generate 2 response options for this question: '{request.question}'. "
+                    f"The dimension is '{dimension}' and difficulty is {difficulty_level}. "
+                    f"IMPORTANT CONTEXT: The user previously said: '{request.user_response}'. "
+                    f"Use this context to generate options that are SPECIFICALLY relevant to what the user mentioned. "
+                    f"Extract key terms, topics, or themes from the user's response and create options that match their specific interests or mentions. "
+                    f"Make responses simple and direct, and ensure they are contextually relevant to the user's previous response."
+                )
+            else:
+                response_prompt = (
+                    f"Generate 2 response options for this question: '{request.question}'. "
+                    f"The dimension is '{dimension}' and difficulty is {difficulty_level}. "
+                    f"Make responses simple and direct."
+                )
             
             # Run in thread pool to avoid blocking
             loop = asyncio.get_event_loop()

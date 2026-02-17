@@ -107,14 +107,24 @@ def generate_followup_question(
 
 {context_text}
 
+CRITICAL REQUIREMENT - EMOTIONAL TONE MATCHING:
+- FIRST, analyze the emotional tone of the user's response:
+  * POSITIVE tone (happy, excited, enthusiastic): Use positive acknowledgements like 'That's great!', 'Awesome!', 'Cool!', 'That sounds fun!', 'Sweet!', 'That's really cool!'
+  * NEGATIVE tone (frustrated, sad, disappointed, difficult): Use empathetic acknowledgements like 'I understand that can be frustrating', 'That sounds tough', 'I can see how that would be challenging', 'That must be difficult', 'I get that can be hard'
+  * NEUTRAL tone (matter-of-fact, informative): Use neutral acknowledgements like 'I see', 'Got it', 'Interesting', 'That makes sense', 'I understand'
+  * MIXED tone (both positive and negative): Acknowledge both aspects appropriately
+
+- The acknowledgement MUST match the emotional tone of what the user said
+- If the user expresses frustration, difficulty, or negative feelings, DO NOT use cheerful acknowledgements like "It's cool!" or "That's awesome!"
+- Instead, use empathetic, understanding acknowledgements that validate their feelings
+- Then add a SHORT personal preference or relatable comment that matches the tone (e.g., for negative: 'I can relate', 'That's tough', 'I understand'; for positive: 'I like that too', 'That sounds fun', 'That's cool')
+
 Requirements:
 - Use "Acknowledgement + Personal Preference + Question" format
-- Start with a brief, encouraging acknowledgement of what the user said
+- Start with a brief acknowledgement that MATCHES the emotional tone of the user's response
 - CRITICAL: Vary your acknowledgements - use different phrases to keep conversations natural
-- Acknowledgement variety examples: 'That's great!', 'Cool!', 'Nice!', 'Awesome!', 'That sounds fun!', 'Interesting!', 'I see!', 'Got it!', 'That's awesome!', 'Sweet!', 'Neat!', 'That's really cool!', 'How cool!', 'That's neat!', 'Sounds awesome!'
 - Avoid repeating the same acknowledgement phrase used in previous questions
-- After the acknowledgement, add a SHORT personal preference or relatable comment on the same line (e.g., 'I like that too', 'That's interesting', 'I can relate', 'Sounds fun', 'That's cool', 'I get that')
-- Keep the personal preference brief (3-6 words) and natural
+- After the acknowledgement, add a SHORT personal preference or relatable comment on the same line (3-6 words) that also matches the tone
 - CRITICAL: NEVER repeat the same question that was asked before (check previous_question in context)
 - If the previous question was similar, ask about a DIFFERENT aspect, angle, or detail of what the user mentioned
 - Ask a follow-up question that relates to the specific things mentioned in the user's response
@@ -123,10 +133,17 @@ Requirements:
 - Keep it clear and simple (Level 1 difficulty)
 - Format: 'Acknowledgement + personal preference' on first line, blank line, then question on next line
 
-Example format: "That's great! I like that too.\n\nDo you play alone or with someone?"
-Example format: "Cool! That sounds fun.\n\nWhat do you like most about it?"
-Example format: "That's awesome! I can relate.\n\nHow long have you been doing that?"
-Example format: "That sounds fun! I get that.\n\nWhat makes it enjoyable for you?"
+Examples for POSITIVE tone:
+"That's great! I like that too.\n\nDo you play alone or with someone?"
+"Awesome! That sounds fun.\n\nWhat do you like most about it?"
+
+Examples for NEGATIVE/FRUSTRATED tone:
+"I understand that can be frustrating. I can relate.\n\nWhat makes it challenging for you?"
+"That sounds tough. I get that.\n\nHow do you handle it when that happens?"
+
+Examples for NEUTRAL tone:
+"I see. That makes sense.\n\nHow often do you do that?"
+"Got it. I understand.\n\nWhat do you like about it?"
 """
 
 

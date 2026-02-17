@@ -182,13 +182,20 @@ def get_or_create_session_topic(session_id: str, topic_name: str) -> Optional[Di
         return None
     
     try:
-        # Try to get existing session topic
-        response = supabase.table('session_topics').select('*').eq('session_id', session_id).eq('topic_name', topic_name).limit(1).execute()
+        # Try to get existing session topic (case-insensitive)
+        # Get all topics for this session and filter case-insensitively
+        all_topics_response = supabase.table('session_topics')\
+            .select('*')\
+            .eq('session_id', session_id)\
+            .execute()
         
-        if response.data and len(response.data) > 0:
-            return response.data[0]
+        if all_topics_response.data:
+            # Find matching topic (case-insensitive)
+            for topic in all_topics_response.data:
+                if topic.get('topic_name', '').lower() == topic_name.lower():
+                    return topic
         
-        # Create new session topic
+        # Create new session topic (use the provided topic_name as-is)
         response = supabase.table('session_topics').insert({
             'session_id': session_id,
             'topic_name': topic_name,
@@ -229,13 +236,21 @@ def is_first_question_for_topic(user_id: str, topic_name: str) -> bool:
         session_ids = [s['id'] for s in sessions_response.data]
         
         # Check if any session has this topic with turn_count > 0
+        # Use case-insensitive matching
         for session_id in session_ids:
-            topic_response = supabase.table('session_topics').select('turn_count').eq('session_id', session_id).eq('topic_name', topic_name).limit(1).execute()
+            # Get all topics for this session and filter case-insensitively
+            topics_response = supabase.table('session_topics')\
+                .select('turn_count, topic_name')\
+                .eq('session_id', session_id)\
+                .execute()
             
-            if topic_response.data and len(topic_response.data) > 0:
-                turn_count = topic_response.data[0].get('turn_count', 0)
-                if turn_count > 0:
-                    return False  # Found a topic with turns, so not first
+            if topics_response.data:
+                # Find matching topic (case-insensitive)
+                for topic in topics_response.data:
+                    if topic.get('topic_name', '').lower() == topic_name.lower():
+                        turn_count = topic.get('turn_count', 0)
+                        if turn_count > 0:
+                            return False  # Found a topic with turns, so not first
         
         return True  # No turns found for this topic
     except Exception as e:
@@ -305,22 +320,51 @@ def get_active_session(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def is_returning_user(username: str) -> bool:
+def is_returning_user(user_id: str) -> bool:
     """
-    Check if a user is a returning user by checking if username exists in database.
+    Check if a user is a returning user by checking if they have previous sessions with conversation turns.
+    A user is considered returning if they have at least one completed or active session with conversation activity.
     
     Args:
-        username: The user's name
+        user_id: The user's UUID
     
     Returns:
-        True if user exists (returning user), False otherwise (first-time user)
+        True if user has previous conversation activity (returning user), False otherwise (first-time user)
     """
     if not supabase:
         return False
     
     try:
-        user = get_user_by_name(username)
-        return user is not None
+        # Check if user has any sessions with conversation turns
+        # Get all sessions for this user
+        sessions_response = supabase.table('sessions').select('id').eq('user_id', user_id).execute()
+        
+        if not sessions_response.data:
+            return False  # No sessions = first-time user
+        
+        session_ids = [s['id'] for s in sessions_response.data]
+        
+        # Check if any session has conversation turns
+        for session_id in session_ids:
+            # Get session topics for this session
+            topics_response = supabase.table('session_topics').select('id').eq('session_id', session_id).execute()
+            
+            if not topics_response.data:
+                continue
+            
+            for topic in topics_response.data:
+                topic_id = topic['id']
+                # Check if this topic has any conversation turns
+                turns_response = supabase.table('conversation_turns')\
+                    .select('id')\
+                    .eq('session_topic_id', topic_id)\
+                    .limit(1)\
+                    .execute()
+                
+                if turns_response.data and len(turns_response.data) > 0:
+                    return True  # Found conversation activity = returning user
+        
+        return False  # No conversation turns found = first-time user
     except Exception as e:
         print(f"Error checking if returning user: {e}")
         return False
@@ -413,6 +457,84 @@ def get_last_conversation_turn(session_topic_id: str) -> Optional[Dict[str, Any]
     except Exception as e:
         print(f"Error getting last conversation turn: {e}")
         return None
+
+
+def get_conversation_history_for_user_topic(user_id: str, topic_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Get conversation history for a user-topic combination across all sessions.
+    Returns the most recent conversation turns (questions and responses) for that topic.
+    
+    Args:
+        user_id: The user's UUID
+        topic_name: The topic name (e.g., 'Gaming', 'Weekend plans', 'food', 'Food')
+        limit: Maximum number of recent turns to retrieve (default: 5)
+    
+    Returns:
+        List of conversation turn dictionaries, ordered by most recent first.
+        Each turn includes question, user_response, dimension, and turn_number.
+    """
+    if not supabase:
+        return []
+    
+    try:
+        # Get all sessions for this user
+        sessions_response = supabase.table('sessions').select('id').eq('user_id', user_id).execute()
+        
+        if not sessions_response.data:
+            print(f"No sessions found for user {user_id}")
+            return []  # No sessions, so no history
+        
+        session_ids = [s['id'] for s in sessions_response.data]
+        print(f"Found {len(session_ids)} sessions for user {user_id}")
+        
+        # Get all session_topics for this topic across all sessions
+        # Try both exact match and case-insensitive match
+        all_turns = []
+        for session_id in session_ids:
+            # Get session topics - try exact match first, then case-insensitive
+            topics_response = supabase.table('session_topics')\
+                .select('id, topic_name')\
+                .eq('session_id', session_id)\
+                .execute()
+            
+            if not topics_response.data:
+                continue
+            
+            # Filter topics by case-insensitive match
+            matching_topics = [
+                t for t in topics_response.data 
+                if t.get('topic_name', '').lower() == topic_name.lower()
+            ]
+            
+            print(f"Session {session_id}: Found {len(matching_topics)} matching topics for '{topic_name}'")
+            
+            for topic in matching_topics:
+                topic_id = topic['id']
+                # Get conversation turns for this topic
+                turns_response = supabase.table('conversation_turns')\
+                    .select('id, turn_number, question, user_response, dimension, question_asked_at')\
+                    .eq('session_topic_id', topic_id)\
+                    .order('turn_number', desc=False)\
+                    .execute()
+                
+                if turns_response.data:
+                    print(f"Found {len(turns_response.data)} turns for topic {topic_id}")
+                    for turn in turns_response.data:
+                        print(f"  Turn {turn.get('turn_number')}: Q='{turn.get('question', '')[:50]}...' A='{turn.get('user_response', '')[:50] if turn.get('user_response') else 'None'}...'")
+                    all_turns.extend(turns_response.data)
+        
+        # Sort all turns by question_asked_at (most recent first) and limit
+        all_turns.sort(key=lambda x: x.get('question_asked_at', ''), reverse=True)
+        
+        # Return the most recent turns (up to limit)
+        result = all_turns[:limit]
+        print(f"Returning {len(result)} conversation turns for user {user_id}, topic {topic_name}")
+        return result
+    except Exception as e:
+        print(f"Error getting conversation history for user {user_id}, topic {topic_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 
 def get_current_session_topic(session_id: str) -> Optional[Dict[str, Any]]:
