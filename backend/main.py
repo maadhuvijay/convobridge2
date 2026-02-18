@@ -2258,38 +2258,40 @@ Return JSON: {{"question":"...","dimension":"...","reasoning":"...","difficulty_
         print(f"[DEBUG] After formatting, formatted_question: {repr(formatted_question[:200])}...")
         print(f"Generated follow-up question: {formatted_question[:200]}...")
         
-        # OPTIMIZATION 3: Return Question Before TTS
-        # Generate TTS audio in background (non-blocking) - use formatted_question
-        audio_base64 = None
-        audio_task = None
+        # Generate TTS audio together with question (wait for completion)
+        # Prepare text for TTS (remove newlines for clean speech)
+        clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
         
-        async def generate_audio_background():
+        # Generate TTS audio and save to database in parallel
+        loop = asyncio.get_event_loop()
+        audio_base64 = None
+        
+        async def generate_audio():
+            """Generate TTS audio for the follow-up question"""
             try:
-                clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
-                loop = asyncio.get_event_loop()
                 audio = await loop.run_in_executor(
                     None,
                     text_to_speech_base64,
                     clean_text_for_speech
                 )
                 if audio:
-                    print(f"Generated audio for question in background ({len(audio)} characters base64)")
+                    print(f"Generated audio for follow-up question ({len(audio)} characters base64)")
                 return audio
             except Exception as e:
-                print(f"Warning: Failed to generate audio in background: {e}")
+                print(f"Warning: Failed to generate audio for follow-up question: {e}")
+                import traceback
+                traceback.print_exc()
                 return None
         
-        # Start TTS generation in background (don't wait)
-        audio_task = asyncio.create_task(generate_audio_background())
-        
-        # Save new conversation turn to database
-        turn_id = None
-        try:
-            # Get or create session_topic
-            session_topic = get_or_create_session_topic(request.session_id, request.topic)
-            if not session_topic:
-                print(f"Warning: Failed to get/create session_topic for session {request.session_id}, topic {request.topic}")
-            else:
+        async def save_to_database():
+            """Save conversation turn to database"""
+            try:
+                # Get or create session_topic
+                session_topic = get_or_create_session_topic(request.session_id, request.topic)
+                if not session_topic:
+                    print(f"Warning: Failed to get/create session_topic for session {request.session_id}, topic {request.topic}")
+                    return None
+                
                 session_topic_id = str(session_topic['id'])
                 # Get current turn count to determine turn_number
                 current_turn = get_current_turn(session_topic_id)
@@ -2309,15 +2311,23 @@ Return JSON: {{"question":"...","dimension":"...","reasoning":"...","difficulty_
                 if conversation_turn:
                     turn_id = str(conversation_turn['id'])
                     print(f"Created follow-up conversation turn {turn_number} (ID: {turn_id}) for topic {request.topic}")
+                    return turn_id
                 else:
                     print(f"Warning: Failed to create conversation_turn for session_topic {session_topic_id}")
-        except Exception as e:
-            print(f"Warning: Error saving conversation state to database: {e}")
-            import traceback
-            traceback.print_exc()
-            # Continue even if database save fails
+                    return None
+            except Exception as e:
+                print(f"Warning: Error saving conversation state to database: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
         
-        # OPTIMIZATION 3: Return Question Before TTS
+        # Execute TTS generation and database save in parallel
+        audio_task = asyncio.create_task(generate_audio())
+        db_task = asyncio.create_task(save_to_database())
+        
+        # Wait for both TTS generation and database save to complete in parallel
+        audio_base64, turn_id = await asyncio.gather(audio_task, db_task)
+        
         # Wait for previous turn update to complete (if it was started)
         if update_task:
             try:
@@ -2325,23 +2335,10 @@ Return JSON: {{"question":"...","dimension":"...","reasoning":"...","difficulty_
             except Exception as e:
                 print(f"Warning: Previous turn update task failed: {e}")
         
-        # Try to get audio if it's ready (wait up to 1 second)
-        audio_base64 = None
-        if audio_task:
-            try:
-                audio_base64 = await asyncio.wait_for(audio_task, timeout=1.0)
-                if audio_base64:
-                    print(f"[OPTIMIZED] Audio ready before return ({len(audio_base64)} characters base64)")
-            except asyncio.TimeoutError:
-                print(f"[OPTIMIZED] Audio not ready in 1s, returning question without audio (will be generated in background)")
-                # Audio will continue generating in background
-            except Exception as e:
-                print(f"Warning: Audio generation failed: {e}")
-        
         return {
             "question": formatted_question,
             "dimension": dimension,
-            "audio_base64": audio_base64,  # May be None if TTS still generating
+            "audio_base64": audio_base64,  # TTS audio for the follow-up question
             "turn_id": turn_id,
             "reasoning": reasoning
         }

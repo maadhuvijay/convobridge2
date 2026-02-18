@@ -369,10 +369,17 @@ export function ChatInterface() {
           setVocabAudioCache(data.audio_base64);
           console.log(`[Vocab Audio] Pre-generated audio for: ${vocab.word}`);
         } else {
-          console.error(`Failed to pre-generate vocab audio: ${response.status}`);
+          const errorText = await response.text().catch(() => 'Unknown error');
+          console.error(`Failed to pre-generate vocab audio: ${response.status} - ${errorText}`);
         }
       } catch (error) {
-        console.error("Error pre-generating vocabulary audio:", error);
+        // Handle network errors (backend not running, CORS, etc.)
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+          console.warn(`[Vocab Audio] Backend server may not be running or unreachable. Skipping pre-generation for: ${vocab.word}`);
+        } else {
+          console.error("Error pre-generating vocabulary audio:", error);
+        }
+        // Don't throw - this is a background operation, failure shouldn't break the UI
       } finally {
         setIsGeneratingVocabAudio(false);
       }
