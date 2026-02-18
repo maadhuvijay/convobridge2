@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+import threading
 import os
 import re
 import json
@@ -95,9 +96,326 @@ from database import (
     save_response_options, save_vocabulary_word,
     get_response_options_for_turn, get_current_session_topic,
     get_current_turn, get_last_conversation_turn,
-    get_conversation_history_for_user_topic
+    get_conversation_history_for_user_topic,
+    get_dimension_history_for_user_topic,
+    get_recent_speech_metrics_for_user_topic,
+    analyze_speech_trends
 )
+from supabase import create_client
+import os
 from tools.text_to_speech import text_to_speech_base64
+
+# Initialize Supabase client for direct database access
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY') or os.getenv('SUPABASE_KEY')
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print(f"[OK] Supabase client initialized in main.py")
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize Supabase client in main.py: {e}")
+        supabase = None
+
+# ============================================================================
+# Pre-generation Cache for Next Questions
+# ============================================================================
+# Simple in-memory cache for pre-generated questions
+# Cache key format: f"{user_id}_{topic}_{previous_turn_id}"
+question_cache: Dict[str, Dict[str, Any]] = {}
+cache_expiry: Dict[str, datetime] = {}
+cache_lock = threading.Lock()  # Thread-safe access
+
+# Track which first questions are currently being pre-generated
+# Key format: f"first_q_{user_id}_{topic}"
+first_question_in_progress: Dict[str, asyncio.Task] = {}
+first_question_lock = threading.Lock()
+
+# ============================================================================
+# Database Query Cache
+# ============================================================================
+# Cache for database query results to avoid repeated queries
+# Cache key format: f"db_{query_type}_{user_id}_{topic}"
+db_query_cache: Dict[str, Dict[str, Any]] = {}
+db_cache_expiry: Dict[str, datetime] = {}
+db_cache_lock = threading.Lock()  # Thread-safe access
+DB_CACHE_TTL = timedelta(seconds=30)  # 30 second TTL for database queries
+
+def get_db_cache_key(query_type: str, user_id: str, topic: str) -> str:
+    """Generate cache key for database query"""
+    normalized_topic = (topic or "").lower().strip()
+    return f"db_{query_type}_{user_id}_{normalized_topic}"
+
+def get_cached_db_query(cache_key: str) -> Optional[Any]:
+    """Retrieve cached database query result if it exists and hasn't expired"""
+    with db_cache_lock:
+        if cache_key in db_query_cache:
+            if db_cache_expiry.get(cache_key, datetime.now()) > datetime.now():
+                print(f"[DB-CACHE HIT] Retrieved cached query for key: {cache_key}")
+                return db_query_cache[cache_key]
+            else:
+                # Expired, clean up
+                del db_query_cache[cache_key]
+                del db_cache_expiry[cache_key]
+                print(f"[DB-CACHE] Expired entry removed for key: {cache_key}")
+        return None
+
+def cache_db_query(cache_key: str, result: Any):
+    """Cache a database query result with TTL"""
+    with db_cache_lock:
+        db_query_cache[cache_key] = result
+        db_cache_expiry[cache_key] = datetime.now() + DB_CACHE_TTL
+        print(f"[DB-CACHE] Cached query result for key: {cache_key} (expires in {DB_CACHE_TTL.total_seconds()}s)")
+
+def clear_db_cache_for_user(user_id: str, topic: str = None):
+    """Clear database query cache for a user (optionally filtered by topic)"""
+    with db_cache_lock:
+        normalized_topic = topic.lower().strip() if topic else None
+        keys_to_remove = []
+        for key in db_query_cache.keys():
+            if normalized_topic:
+                if key.startswith(f"db_") and f"_{user_id}_{normalized_topic}" in key:
+                    keys_to_remove.append(key)
+            else:
+                if key.startswith(f"db_") and f"_{user_id}_" in key:
+                    keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del db_query_cache[key]
+            if key in db_cache_expiry:
+                del db_cache_expiry[key]
+        
+        if keys_to_remove:
+            print(f"[DB-CACHE] Cleared {len(keys_to_remove)} entries for user {user_id}" + (f", topic {topic}" if topic else ""))
+
+def summarize_conversation_history(conversation_history: List[Dict[str, Any]], max_turns: int = 3) -> str:
+    """
+    Rule-based summarization of conversation history.
+    Extracts key information from user responses and summarizes questions.
+    
+    Args:
+        conversation_history: List of conversation turn dictionaries
+        max_turns: Maximum number of recent turns to summarize (default: 3)
+    
+    Returns:
+        Concise summary string of conversation history
+    """
+    if not conversation_history:
+        return ""
+    
+    # Get last N turns (most recent first)
+    recent_turns = conversation_history[-max_turns:] if len(conversation_history) > max_turns else conversation_history
+    
+    # Extract key information from user responses
+    user_points = []
+    question_themes = []
+    
+    for turn in reversed(recent_turns):  # Process in chronological order
+        question = (turn.get('question') or '').strip()
+        user_response = (turn.get('user_response') or '').strip() or (turn.get('transcript') or '').strip()
+        
+        if user_response:
+            # Extract key points from user response (first 100 chars, remove filler)
+            response_summary = user_response[:100].strip()
+            # Remove common filler phrases
+            response_summary = re.sub(r'^(um|uh|like|you know|i mean|well|so)\s*,?\s*', '', response_summary, flags=re.IGNORECASE)
+            if response_summary:
+                user_points.append(response_summary)
+        
+        if question:
+            # Extract question theme (first 80 chars, remove common prefixes)
+            question_theme = question[:80].strip()
+            question_theme = re.sub(r'^(here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_theme, flags=re.IGNORECASE)
+            if question_theme:
+                question_themes.append(question_theme)
+    
+    # Build concise summary
+    summary_parts = []
+    
+    if user_points:
+        # Combine user points into a single summary
+        if len(user_points) == 1:
+            summary_parts.append(f"User said: {user_points[0]}")
+        elif len(user_points) == 2:
+            summary_parts.append(f"User mentioned: {user_points[0]}; {user_points[1]}")
+        else:
+            # For 3+ points, summarize (show first 2, count rest)
+            summary_parts.append(f"User discussed: {user_points[0]}, {user_points[1]}, and {len(user_points)-2} more topics")
+    
+    # Always return a summary, even if minimal
+    if summary_parts:
+        return "History: " + ". ".join(summary_parts)
+    elif question_themes:
+        # If no user responses but questions exist
+        return f"History: {len(question_themes)} previous questions asked"
+    else:
+        # Fallback
+        return "History: previous conversation"
+
+async def get_user_topic_data_parallel(user_id: str, topic: str) -> tuple:
+    """
+    Fetch conversation history, dimension history, and speech metrics in parallel.
+    Uses caching to avoid repeated queries.
+    
+    Returns:
+        (conversation_history, dimension_history, speech_metrics)
+    """
+    # Check cache first
+    history_key = get_db_cache_key("history", user_id, topic)
+    dimension_key = get_db_cache_key("dimensions", user_id, topic)
+    speech_key = get_db_cache_key("speech", user_id, topic)
+    
+    cached_history = get_cached_db_query(history_key)
+    cached_dimensions = get_cached_db_query(dimension_key)
+    cached_speech = get_cached_db_query(speech_key)
+    
+    # Initialize results with cached values or None
+    conversation_history = cached_history
+    dimension_history = cached_dimensions
+    speech_metrics = cached_speech
+    
+    # Build list of tasks for queries that need to be executed
+    tasks = []
+    task_info = []  # List of (query_type, cache_key) tuples
+    
+    # History query
+    if cached_history is None:
+        tasks.append(asyncio.to_thread(get_conversation_history_for_user_topic, user_id, topic, 5))
+        task_info.append(("history", history_key))
+    
+    # Dimension query
+    if cached_dimensions is None:
+        tasks.append(asyncio.to_thread(get_dimension_history_for_user_topic, user_id, topic, 10))
+        task_info.append(("dimensions", dimension_key))
+    
+    # Speech metrics query
+    if cached_speech is None:
+        tasks.append(asyncio.to_thread(get_recent_speech_metrics_for_user_topic, user_id, topic, 5))
+        task_info.append(("speech", speech_key))
+    
+    # Execute queries in parallel (only for uncached queries)
+    if tasks:
+        print(f"[DB-QUERY] Executing {len(tasks)} database queries in parallel for user {user_id}, topic {topic}...")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results and cache them
+        for i, (query_type, cache_key) in enumerate(task_info):
+            result = results[i]
+            
+            if isinstance(result, Exception):
+                print(f"[DB-QUERY] Error in {query_type} query: {result}")
+                # Use empty result on error
+                result = [] if query_type != "dimensions" else []
+            else:
+                # Cache the result
+                cache_db_query(cache_key, result)
+            
+            # Assign result to appropriate variable
+            if query_type == "history":
+                conversation_history = result
+            elif query_type == "dimensions":
+                dimension_history = result
+            elif query_type == "speech":
+                speech_metrics = result
+    else:
+        # All queries were cached
+        print(f"[DB-QUERY] All queries retrieved from cache for user {user_id}, topic {topic}")
+    
+    return conversation_history, dimension_history, speech_metrics
+
+def get_cache_key(user_id: str, topic: str, previous_turn_id: str) -> str:
+    """Generate cache key for pre-generated question"""
+    # Normalize topic to lowercase for consistent cache keys
+    normalized_topic = (topic or "").lower().strip()
+    return f"{user_id}_{normalized_topic}_{previous_turn_id}"
+
+def get_first_question_cache_key(user_id: str, topic: str) -> str:
+    """Generate cache key for pre-generated first question (topic-level, not turn-based)"""
+    normalized_topic = (topic or "").lower().strip()
+    return f"first_q_{user_id}_{normalized_topic}"
+
+def cache_first_question(cache_key: str, question_data: Dict[str, Any]):
+    """Cache a pre-generated first question with 30-minute expiry"""
+    with cache_lock:
+        question_cache[cache_key] = question_data
+        cache_expiry[cache_key] = datetime.now() + timedelta(minutes=30)
+        print(f"[FIRST-Q CACHE] Cached first question for key: {cache_key} (expires in 30 minutes)")
+
+def get_cached_first_question(cache_key: str) -> Optional[Dict[str, Any]]:
+    """Retrieve cached first question if it exists and hasn't expired"""
+    with cache_lock:
+        if cache_key in question_cache:
+            # Check expiry
+            if cache_expiry.get(cache_key, datetime.now()) > datetime.now():
+                cached = question_cache[cache_key]
+                # Don't remove from cache (can be reused multiple times)
+                print(f"[FIRST-Q CACHE HIT] Retrieved pre-generated first question for key: {cache_key}")
+                return cached
+            else:
+                # Expired, clean up
+                del question_cache[cache_key]
+                del cache_expiry[cache_key]
+                print(f"[FIRST-Q CACHE] Expired entry removed for key: {cache_key}")
+        return None
+
+def cache_question(cache_key: str, question_data: Dict[str, Any]):
+    """Cache a pre-generated question with 5-minute expiry"""
+    with cache_lock:
+        question_cache[cache_key] = question_data
+        cache_expiry[cache_key] = datetime.now() + timedelta(minutes=5)
+        print(f"[CACHE] Cached question for key: {cache_key} (expires in 5 minutes)")
+
+def get_cached_question(cache_key: str) -> Optional[Dict[str, Any]]:
+    """Retrieve cached question if it exists and hasn't expired"""
+    with cache_lock:
+        if cache_key in question_cache:
+            # Check expiry
+            if cache_expiry.get(cache_key, datetime.now()) > datetime.now():
+                cached = question_cache[cache_key]
+                # Remove from cache after retrieval (single-use)
+                del question_cache[cache_key]
+                del cache_expiry[cache_key]
+                print(f"[CACHE HIT] Retrieved pre-generated question for key: {cache_key}")
+                return cached
+            else:
+                # Expired, clean up
+                del question_cache[cache_key]
+                del cache_expiry[cache_key]
+                print(f"[CACHE] Expired entry removed for key: {cache_key}")
+        return None
+
+def clear_cache_for_user(user_id: str, topic: str = None):
+    """Clear cache entries for a user (optionally filtered by topic)"""
+    with cache_lock:
+        keys_to_remove = []
+        normalized_topic = topic.lower().strip() if topic else None
+        for key in question_cache.keys():
+            if normalized_topic:
+                if key.startswith(f"{user_id}_{normalized_topic}_"):
+                    keys_to_remove.append(key)
+            else:
+                if key.startswith(f"{user_id}_"):
+                    keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del question_cache[key]
+            if key in cache_expiry:
+                del cache_expiry[key]
+        
+        if keys_to_remove:
+            print(f"[CACHE] Cleared {len(keys_to_remove)} entries for user {user_id}" + (f", topic {topic}" if topic else ""))
+
+def cleanup_expired_cache():
+    """Remove expired cache entries (can be called periodically)"""
+    with cache_lock:
+        now = datetime.now()
+        expired_keys = [key for key, expiry in cache_expiry.items() if expiry <= now]
+        for key in expired_keys:
+            if key in question_cache:
+                del question_cache[key]
+            del cache_expiry[key]
+        if expired_keys:
+            print(f"[CACHE] Cleaned up {len(expired_keys)} expired entries")
 
 # Load .env file - check multiple locations
 backend_dir = Path(__file__).parent
@@ -270,6 +588,7 @@ class QuestionOnlyResponse(BaseModel):
     dimension: str = "Basic Preferences"
     audio_base64: Optional[str] = None  # Base64-encoded audio for text-to-speech
     turn_id: Optional[str] = None  # Conversation turn ID for linking response options and vocabulary
+    reasoning: Optional[str] = None  # Orchestrator's reasoning for dimension selection
 
 class ContinueConversationRequest(BaseModel):
     topic: str
@@ -358,6 +677,15 @@ class GetPreviousTopicStateResponse(BaseModel):
     last_response_options: List[str]
     last_question: Optional[str] = None
 
+class PreGenerationStatusRequest(BaseModel):
+    user_id: str
+    topic: str
+    previous_turn_id: str
+
+class PreGenerationStatusResponse(BaseModel):
+    ready: bool
+    message: str
+
 @app.get("/")
 def read_root():
     return {"status": "ConvoBridge Backend Active"}
@@ -370,7 +698,10 @@ async def login(request: LoginRequest):
     Falls back to in-memory storage if Supabase is not configured.
     """
     try:
-        username = request.username.strip()
+        # Validate and normalize username
+        if not request.username:
+            raise HTTPException(status_code=400, detail="Username is required")
+        username = (request.username or "").strip()
         if not username:
             raise HTTPException(status_code=400, detail="Username cannot be empty")
         
@@ -417,6 +748,24 @@ async def login(request: LoginRequest):
         if session_id:
             print(f"Created session: {session_id}")
         
+        # Clear any stale pre-generation tasks from previous sessions
+        with first_question_lock:
+            # Remove any stale/done tasks
+            stale_keys = [k for k, task in first_question_in_progress.items() if task.done()]
+            for key in stale_keys:
+                del first_question_in_progress[key]
+            if stale_keys:
+                print(f"[LOGIN] Cleaned up {len(stale_keys)} stale pre-generation tasks")
+        
+        # Trigger pre-generation of first questions for all topics in the background
+        # This allows instant topic selection without waiting for question generation
+        try:
+            asyncio.create_task(pre_generate_all_first_questions(user_id, difficulty_level=1))
+            print(f"[LOGIN] Triggered background pre-generation of first questions for all topics")
+        except Exception as e:
+            print(f"[LOGIN] Warning: Failed to trigger pre-generation: {e}")
+            # Don't fail login if pre-generation fails
+        
         return {
             "user_id": user_id,
             "username": user['name'],
@@ -443,7 +792,10 @@ async def logout(request: LogoutRequest):
     in the database during the session, so this just marks the session as completed.
     """
     try:
-        user_id = request.user_id.strip()
+        # Validate and normalize user_id
+        if not request.user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+        user_id = (request.user_id or "").strip()
         if not user_id:
             raise HTTPException(status_code=400, detail="User ID cannot be empty")
         
@@ -502,10 +854,20 @@ async def get_previous_topic_state(request: GetPreviousTopicStateRequest):
         # Get last topic data for user
         last_topic_data = get_last_topic_for_user(user_id)
         
-        if not last_topic_data or last_topic_data.get('topic_name') != topic_name:
+        # Case-insensitive comparison for topic name
+        if not last_topic_data:
             raise HTTPException(
                 status_code=404,
-                detail=f"No previous conversation found for topic '{topic_name}'"
+                detail=f"No previous conversation found for user '{user_id}'"
+            )
+        
+        stored_topic_name = last_topic_data.get('topic_name', '').strip()
+        requested_topic_name = topic_name.strip()
+        
+        if stored_topic_name.lower() != requested_topic_name.lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No previous conversation found for topic '{topic_name}'. Last topic was '{stored_topic_name}'"
             )
         
         # Extract information from last turn
@@ -536,6 +898,46 @@ async def get_previous_topic_state(request: GetPreviousTopicStateRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error retrieving previous topic state: {str(e)}")
+
+@app.post("/api/check_pre_generation_status", response_model=PreGenerationStatusResponse)
+async def check_pre_generation_status(request: PreGenerationStatusRequest):
+    """
+    Check if a pre-generated question is ready in the cache.
+    Used by frontend to determine when to enable the "Continue Chat" button.
+    """
+    try:
+        cache_key = get_cache_key(request.user_id, request.topic, request.previous_turn_id)
+        
+        # Check cache (this doesn't remove the entry, just checks if it exists)
+        with cache_lock:
+            if cache_key in question_cache:
+                # Check if expired
+                if cache_expiry.get(cache_key, datetime.now()) > datetime.now():
+                    print(f"[STATUS] Pre-generation ready for key: {cache_key}")
+                    return {
+                        "ready": True,
+                        "message": "Question is ready"
+                    }
+                else:
+                    # Expired, clean up
+                    del question_cache[cache_key]
+                    if cache_key in cache_expiry:
+                        del cache_expiry[cache_key]
+                    print(f"[STATUS] Pre-generation expired for key: {cache_key}")
+        
+        print(f"[STATUS] Pre-generation not ready for key: {cache_key}")
+        return {
+            "ready": False,
+            "message": "Question is still being generated"
+        }
+    except Exception as e:
+        print(f"[STATUS] Error checking pre-generation status: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "ready": False,
+            "message": f"Error checking status: {str(e)}"
+        }
 
 @app.post("/api/get_user", response_model=GetUserResponse)
 async def get_user(request: GetUserRequest):
@@ -578,6 +980,19 @@ async def start_conversation(request: TopicRequest):
         user_id = request.user_id
         topic = request.topic
         
+        # Validate required fields
+        if not topic or not topic.strip():
+            raise HTTPException(status_code=400, detail="Topic is required and cannot be empty")
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="User ID is required and cannot be empty")
+        
+        topic = topic.strip()  # Normalize topic
+        
+        # Clear caches for this user/topic when starting a new conversation
+        # (in case user changed topic or wants fresh start)
+        clear_cache_for_user(user_id, topic)
+        clear_db_cache_for_user(user_id, topic)
+        
         # Check if this is the first question for this topic using database
         # Fallback to True if database is not available
         try:
@@ -586,91 +1001,334 @@ async def start_conversation(request: TopicRequest):
             print(f"Warning: Error checking first question in database: {e}. Defaulting to first question.")
             is_first_question = True
         
-        # Get conversation history for this user-topic combination
+        # If this is a first question, check if we have a pre-generated cached version
+        if is_first_question:
+            cache_key = get_first_question_cache_key(user_id, topic)
+            cached_first_question = get_cached_first_question(cache_key)
+            
+            # If not cached, check if pre-generation is in progress and wait for it
+            if not cached_first_question:
+                with first_question_lock:
+                    if cache_key in first_question_in_progress:
+                        task = first_question_in_progress[cache_key]
+                        if not task.done():
+                            print(f"[CACHE WAIT] Pre-generation in progress for topic: {topic}, waiting...")
+                            try:
+                                # Wait up to 10 seconds for pre-generation to complete
+                                cached_first_question = await asyncio.wait_for(task, timeout=10.0)
+                                if cached_first_question:
+                                    print(f"[CACHE WAIT] Pre-generation completed, using cached question")
+                            except asyncio.TimeoutError:
+                                print(f"[CACHE WAIT] Timeout waiting for pre-generation, falling back to normal generation")
+                                cached_first_question = None
+                            except Exception as e:
+                                print(f"[CACHE WAIT] Error waiting for pre-generation: {e}, falling back to normal generation")
+                                cached_first_question = None
+            
+            if cached_first_question:
+                print(f"[CACHE HIT] Using pre-generated first question for topic: {topic}")
+                # We have a cached first question - use it!
+                question_text = cached_first_question['question']
+                dimension = cached_first_question['dimension']
+                reasoning = cached_first_question.get('reasoning')
+                orchestrator_difficulty = cached_first_question.get('difficulty_level', request.difficulty_level)
+                audio_base64 = cached_first_question.get('audio_base64')
+                
+                # Still need to create the database turn
+                turn_id = None
+                try:
+                    if supabase:
+                        session_topic = get_or_create_session_topic(request.session_id, topic)
+                        if session_topic:
+                            session_topic_id = str(session_topic['id'])
+                            current_turn = get_current_turn(session_topic_id)
+                            turn_number = 1
+                            if current_turn:
+                                turn_number = current_turn.get('turn_number', 0) + 1
+                            
+                            conversation_turn = create_conversation_turn(
+                                session_topic_id=session_topic_id,
+                                turn_number=turn_number,
+                                dimension=dimension,
+                                difficulty_level=orchestrator_difficulty,
+                                question=question_text
+                            )
+                            
+                            if conversation_turn:
+                                turn_id = str(conversation_turn['id'])
+                                print(f"Created conversation turn {turn_number} (ID: {turn_id}) for topic {topic} (from cache)")
+                except Exception as e:
+                    print(f"Warning: Error saving conversation state to database: {e}")
+                    # Continue even if database save fails
+                
+                return {
+                    "question": question_text,
+                    "dimension": dimension,
+                    "audio_base64": audio_base64,
+                    "turn_id": turn_id,
+                    "reasoning": reasoning
+                }
+        
+        # OPTIMIZATION: Skip history retrieval for first questions (even for returning users)
+        # First questions should be simple and welcoming, no need for complex context
         conversation_history = []
+        dimension_history = []
+        speech_metrics = []
+        speech_trends = None
+        history_context = ""
+        
+        # Only fetch history if this is NOT a first question
         if not is_first_question:
             try:
-                conversation_history = get_conversation_history_for_user_topic(user_id, topic, limit=5)
-                print(f"Retrieved {len(conversation_history)} previous conversation turns for user {user_id}, topic {topic}")
+                conversation_history, dimension_history, speech_metrics = await get_user_topic_data_parallel(user_id, topic)
+                speech_trends = analyze_speech_trends(speech_metrics)
+                print(f"Retrieved {len(conversation_history)} conversation turns, {len(dimension_history)} dimensions, and {len(speech_metrics)} speech metrics for user {user_id}, topic {topic}")
+                if speech_trends:
+                    print(f"Speech trends: clarity={speech_trends['clarity_trend']}, pace={speech_trends['pace_trend']}, confidence={speech_trends['confidence_level']}")
+                # Build history context only for non-first questions
+                history_context = summarize_conversation_history(conversation_history, max_turns=5) if conversation_history else ""
             except Exception as e:
-                print(f"Warning: Error retrieving conversation history: {e}. Continuing without history.")
+                print(f"Warning: Error retrieving conversation/dimension/speech history: {e}. Continuing without history.")
+                import traceback
+                traceback.print_exc()
                 conversation_history = []
+                dimension_history = []
+                speech_metrics = []
+                speech_trends = None
+                history_context = ""
         
-        # Always use Basic Preferences for the first question on any topic
-        # For returning users, we still use Basic Preferences but with conversation context
-        dimension = "Basic Preferences"
+        # Create orchestrator prompt with topic and context
         if is_first_question:
-            print(f"First question for user {user_id} on topic {topic} - using Basic Preferences")
-        else:
-            print(f"Continuing conversation for user {user_id} on topic {topic} - using Basic Preferences with context")
-        
-        # Build prompt with conversation history if available
-        if conversation_history and len(conversation_history) > 0:
-            # Format conversation history for the prompt
-            history_text = "Previous conversation history (what the user has already discussed):\n"
-            # Reverse to show chronological order (oldest first)
-            turns_with_responses = []
-            for turn in reversed(conversation_history):
-                question = turn.get('question', '')
-                user_response = turn.get('user_response', '') or turn.get('transcript', '')
-                if question:
-                    history_text += f"Q: {question}\n"
-                    if user_response:
-                        history_text += f"A: {user_response}\n"
-                        turns_with_responses.append((question, user_response))
-                    history_text += "\n"
+            print(f"[ORCHESTRATOR] First question for user {user_id} on topic {topic} (skipping history for speed)")
             
-            # Extract key information from user responses
-            user_info_summary = ""
-            if turns_with_responses:
-                user_info_summary = "\nKey information the user has shared:\n"
-                for q, a in turns_with_responses:
-                    user_info_summary += f"- {a}\n"
+            # Build minimal JSON context for first questions (no history needed)
+            context_json = {
+                "t": str(topic)[:20],  # topic shortened
+                "d": int(request.difficulty_level),  # diff
+                "f": True  # is_first
+            }
             
-            prompt = f"""Generate a NEW conversation question about {request.topic} for a teen. Dimension: {dimension}. The difficulty level is {request.difficulty_level}.
+            # Short task instructions (OPTIMIZED - minimal prompt for first questions)
+            orchestrator_prompt = f"""Gen first Q for teen.
 
-{history_text}
-{user_info_summary}
+Ctx: {json.dumps(context_json, separators=(',', ':'))}
 
-CRITICAL REQUIREMENTS:
-- This is a CONTINUATION of a previous conversation about {topic}
-- The user has ALREADY shared information in the conversation history above
-- DO NOT ask questions about information the user has already provided
-- For example, if the user already said their favorite food is chicken, DO NOT ask "What's your favorite food?" again
-- Generate a NEW question that builds on what the user has already discussed
-- Ask about a DIFFERENT aspect, angle, or detail related to what they mentioned
-- Use the information from their previous responses to ask deeper, more specific questions
-- Do NOT repeat any of the previous questions shown above
-- Keep it natural and conversational
-- The question should feel like a natural continuation that shows you remember what they said"""
+Task: Select "Basic Preferences" → Gen Q (teen-appropriate, positive, simple)
+
+Return JSON: {{"question":"...","dimension":"Basic Preferences","reasoning":"...","difficulty_level":1}}"""
         else:
-            # First question - no history
-            prompt = f"Generate a conversation question about {request.topic} for a teen. Dimension: {dimension}. The difficulty level is {request.difficulty_level}."
+            # Build speech performance context if available
+            speech_context = ""
+            if speech_trends:
+                recent_clarity_scores = [m.get('clarity_score', 0.0) for m in speech_metrics[:3] if m.get('clarity_score') is not None]
+                avg_clarity = speech_trends['average_clarity']
+                recent_clarity = speech_trends['recent_clarity']
+                avg_pace = speech_trends['average_pace']
+                speech_context = f"Speech: clarity_trend={speech_trends['clarity_trend']}, clarity_avg={avg_clarity:.2f}, clarity_recent={recent_clarity:.2f}, pace_trend={speech_trends['pace_trend']}, pace_avg={avg_pace:.0f}wpm, conf={speech_trends['confidence_level']}, recent_scores={recent_clarity_scores}"
+            elif speech_metrics:
+                recent_clarity = speech_metrics[0].get('clarity_score') if speech_metrics else None
+                if recent_clarity is not None:
+                    speech_context = f"Speech: clarity_recent={recent_clarity:.2f} (limited data)"
+            
+            # Check if same dimension used 2+ times in a row
+            dimension_warning = ""
+            if dimension_history and len(dimension_history) >= 2:
+                last_two = dimension_history[:2]
+                if last_two[0] == last_two[1]:
+                    dimension_warning = f"⚠️ CRITICAL: Last 2 turns used '{last_two[0]}'. You MUST switch to a DIFFERENT dimension now!"
+                    print(f"[ORCHESTRATOR] WARNING: Same dimension '{last_two[0]}' used 2 times in a row - forcing switch")
+            
+            dimension_context = ""
+            if dimension_history:
+                dimension_context = f"Recently used dimensions: {', '.join(dimension_history[:5])}\n"
+                if dimension_warning:
+                    dimension_context += dimension_warning + "\n"
+                else:
+                    dimension_context += "Avoid repeating these dimensions unless it's a natural continuation.\n"
+            
+            print(f"[ORCHESTRATOR] Continuing conversation for user {user_id} on topic {topic}")
+            
+            # Build JSON context (Option 4: structured data)
+            context_json = {
+                "user_id": str(user_id) if user_id else "",
+                "topic": str(topic) if topic else "",
+                "diff": int(request.difficulty_level),
+                "is_first": False,
+                "history": str(history_context) if history_context else None,
+                "dims_used": [str(d) for d in (dimension_history[:3] if dimension_history else [])],
+                "speech": str(speech_context) if speech_context else None
+            }
+            
+            # Short task instructions with dimension switching enforcement
+            dims_list = dimension_history[:3] if dimension_history else []
+            dims_str = ', '.join(dims_list) if dims_list else 'none'
+            switch_instruction = dimension_warning if dimension_warning else f"Select dimension (avoid: {dims_str})"
+            
+            orchestrator_prompt = f"""Gen Q for teen. Follow system instructions for topic-based reasoning and continue conversation.
+
+Ctx: {json.dumps(context_json, separators=(',', ':'))}
+
+Task: Analyze topic+history → {switch_instruction} → Adjust difficulty → Gen Q (build on history, don't repeat, teen-appropriate)
+
+Return JSON: {{"question": "...", "dimension": "...", "reasoning": "...", "difficulty_level": 1}}"""
         
-        # Run the conversation agent directly
-        response = conversation_agent.run(prompt)
-        question_text = response.content.strip()
+        # Use orchestrator instead of direct agent call
+        print(f"[ORCHESTRATOR] Calling orchestrator for topic: {topic}, user: {user_id}")
+        loop = asyncio.get_event_loop()
+        reasoning = None  # Initialize reasoning
+        orchestrator_response = None
+        max_retries = 3
+        retry_delay = 2  # Start with 2 seconds
         
-        # Preserve the full response for TTS - don't aggressively strip content
-        # Only remove very specific instruction prefixes that are clearly not part of conversation
-        question_text = re.sub(r'^(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
+        for attempt in range(max_retries):
+            try:
+                orchestrator_response = await loop.run_in_executor(
+                    None,
+                    orchestrator.run,
+                    orchestrator_prompt
+                )
+                
+                if not orchestrator_response or not orchestrator_response.content:
+                    raise ValueError("Orchestrator returned empty response")
+                
+                print(f"[ORCHESTRATOR] Received response (length: {len(orchestrator_response.content)} chars)")
+                print(f"[ORCHESTRATOR] Raw response preview: {orchestrator_response.content[:200]}...")
+                break  # Success, exit retry loop
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error
+                if "rate limit" in error_str.lower() or "tpm" in error_str.lower() or "rpm" in error_str.lower():
+                    if attempt < max_retries - 1:
+                        # Extract wait time from error if available
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"[ORCHESTRATOR] Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        raise HTTPException(
+                            status_code=429,
+                            detail=f"Rate limit exceeded. Please try again in a few moments."
+                        )
+                else:
+                    # Not a rate limit error, re-raise
+                    raise
         
-        # Extract text within quotes ONLY if the ENTIRE response is wrapped in quotes
-        # Don't extract partial quotes as that breaks natural conversation flow
-        if (question_text.startswith('"') and question_text.endswith('"')) or \
-           (question_text.startswith("'") and question_text.endswith("'")):
-            question_text = question_text[1:-1].strip()
+        try:
+            
+            # Parse JSON response from orchestrator
+            orchestrator_content = (orchestrator_response.content or '').strip()
+            
+            # Remove markdown code blocks if present
+            orchestrator_content = re.sub(r'```json\s*', '', orchestrator_content)
+            orchestrator_content = re.sub(r'```\s*', '', orchestrator_content)
+            orchestrator_content = orchestrator_content.strip()
+            
+            # Extract JSON object
+            start_idx = orchestrator_content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in orchestrator response")
+            
+            brace_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(orchestrator_content)):
+                if orchestrator_content[i] == '{':
+                    brace_count += 1
+                elif orchestrator_content[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if brace_count != 0:
+                raise ValueError("Unclosed JSON object in orchestrator response")
+            
+            orchestrator_content = orchestrator_content[start_idx:end_idx]
+            
+            # Parse JSON
+            orchestrator_data = json.loads(orchestrator_content)
+            
+            # Validate required fields
+            if 'question' not in orchestrator_data or not orchestrator_data.get('question'):
+                raise ValueError("Orchestrator response missing 'question' field")
+            if 'dimension' not in orchestrator_data or not orchestrator_data.get('dimension'):
+                raise ValueError("Orchestrator response missing 'dimension' field")
+            
+            # Extract data (with None safety)
+            question_text = (orchestrator_data.get('question') or '').strip()
+            dimension = (orchestrator_data.get('dimension') or '').strip()
+            reasoning = orchestrator_data.get('reasoning', '') or None
+            if reasoning:
+                reasoning = str(reasoning).strip() or None
+            orchestrator_difficulty = orchestrator_data.get('difficulty_level', request.difficulty_level)
+            
+            # Validate that we have required fields
+            if not question_text:
+                raise ValueError("Orchestrator response 'question' field is empty or None")
+            if not dimension:
+                raise ValueError("Orchestrator response 'dimension' field is empty or None")
+            
+            # Validate dimension (log warning if not in list, but allow flexibility)
+            if dimension not in DIMENSIONS and dimension != "Basic Preferences":
+                print(f"[ORCHESTRATOR] WARNING: Dimension '{dimension}' not in standard list. Allowing flexibility.")
+            else:
+                print(f"[ORCHESTRATOR] Dimension '{dimension}' validated against standard list.")
+            
+            # Log detailed orchestrator decisions
+            print(f"[ORCHESTRATOR] ===== DECISION LOG =====")
+            print(f"[ORCHESTRATOR] Topic: {topic}")
+            print(f"[ORCHESTRATOR] Is First Question: {is_first_question}")
+            print(f"[ORCHESTRATOR] Chosen Dimension: {dimension}")
+            print(f"[ORCHESTRATOR] Chosen Difficulty Level: {orchestrator_difficulty}")
+            print(f"[ORCHESTRATOR] Requested Difficulty Level: {request.difficulty_level}")
+            if reasoning:
+                print(f"[ORCHESTRATOR] Reasoning: {reasoning}")
+            else:
+                print(f"[ORCHESTRATOR] WARNING: Reasoning field missing (optional but preferred)")
+            print(f"[ORCHESTRATOR] Generated Question: {question_text}")
+            print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")
+            
+            # Use orchestrator's difficulty level if different from requested
+            final_difficulty = orchestrator_difficulty if orchestrator_difficulty != request.difficulty_level else request.difficulty_level
+            if orchestrator_difficulty != request.difficulty_level:
+                print(f"[ORCHESTRATOR] Using orchestrator's difficulty level {orchestrator_difficulty} instead of requested {request.difficulty_level}")
+            
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse orchestrator JSON response: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            print(f"[ORCHESTRATOR] Raw response: {orchestrator_response.content if orchestrator_response else 'No response'}")
+            error_detail = f"{error_msg} | Response preview: {orchestrator_response.content[:200] if orchestrator_response else 'No response'}"
+            print(f"[ORCHESTRATOR] Full error detail: {error_detail}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_detail
+            )
+        except ValueError as e:
+            error_msg = f"Orchestrator validation error: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            print(f"[ORCHESTRATOR] Raw response: {orchestrator_response.content if orchestrator_response else 'No response'}")
+            error_detail = f"{error_msg} | Response preview: {orchestrator_response.content[:200] if orchestrator_response else 'No response'}"
+            print(f"[ORCHESTRATOR] Full error detail: {error_detail}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_detail
+            )
+        except Exception as e:
+            error_msg = f"Orchestrator execution error: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            error_detail = f"{error_msg} | Response preview: {orchestrator_response.content[:200] if orchestrator_response and hasattr(orchestrator_response, 'content') else 'No response'}"
+            print(f"[ORCHESTRATOR] Full error detail: {error_detail}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_detail
+            )
         
-        # Extract text after bold markers ONLY if the entire response is bold
-        if question_text.startswith('**') and question_text.endswith('**'):
-            question_text = question_text[2:-2].strip()
+        # Clean up question text (minimal - orchestrator should return clean text)
+        question_text = (question_text or '').strip()
         
-        # For TTS, preserve the FULL text including acknowledgements
-        # Don't split by periods or extract only questions - that breaks natural flow
-        # The agent's response should be spoken in full
-        
-        # Final cleanup - minimal, preserve the natural flow
-        question_text = question_text.strip()
+        # Use orchestrator's difficulty level for database and response
+        difficulty_level_to_use = final_difficulty
         
         # Save conversation state to database
         turn_id = None
@@ -692,7 +1350,7 @@ CRITICAL REQUIREMENTS:
                     session_topic_id=session_topic_id,
                     turn_number=turn_number,
                     dimension=dimension,
-                    difficulty_level=request.difficulty_level,
+                    difficulty_level=difficulty_level_to_use,
                     question=question_text
                 )
                 
@@ -728,136 +1386,844 @@ CRITICAL REQUIREMENTS:
             "question": question_text,
             "dimension": dimension,
             "audio_base64": audio_base64,
-            "turn_id": turn_id
+            "turn_id": turn_id,
+            "reasoning": reasoning
         }
     except Exception as e:
         print(f"Error starting conversation: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating question: {str(e)}")
+
+async def pre_generate_first_question_for_topic(
+    user_id: str,
+    topic: str,
+    difficulty_level: int = 1
+):
+    """
+    Pre-generate the first question for a specific topic.
+    This is used to pre-generate questions for all topics on login.
+    """
+    cache_key = get_first_question_cache_key(user_id, topic)
+    
+    try:
+        print(f"[PRE-GEN FIRST-Q] Starting pre-generation for topic: {topic}, user: {user_id}")
+        
+        # Check if already cached
+        cached = get_cached_first_question(cache_key)
+        if cached:
+            print(f"[PRE-GEN FIRST-Q] Already cached for topic: {topic}")
+            return cached
+        
+        # Check if already in progress (with self-check and stale task cleanup)
+        current_task = asyncio.current_task()
+        with first_question_lock:
+            if cache_key in first_question_in_progress:
+                existing_task = first_question_in_progress[cache_key]
+                # Check if it's the current task (avoid waiting for ourselves)
+                if existing_task is current_task:
+                    # This is the same task, don't wait - just continue
+                    print(f"[PRE-GEN FIRST-Q] Same task detected for topic: {topic}, continuing...")
+                elif existing_task.done():
+                    # Task is done but not cleaned up, remove it
+                    print(f"[PRE-GEN FIRST-Q] Found stale completed task for topic: {topic}, cleaning up...")
+                    del first_question_in_progress[cache_key]
+                else:
+                    # Task is in progress - skip waiting and just proceed (avoid deadlocks)
+                    # The existing task will complete in background, we'll generate fresh
+                    print(f"[PRE-GEN FIRST-Q] Task already in progress for topic: {topic}, skipping wait and generating fresh...")
+                    # Remove the old task entry to avoid conflicts
+                    del first_question_in_progress[cache_key]
+            
+            # Mark this task as in progress
+            if current_task:
+                first_question_in_progress[cache_key] = current_task
+        
+        # Build orchestrator prompt for first question
+        context_json = {
+            "user_id": str(user_id) if user_id else "",
+            "topic": str(topic) if topic else "",
+            "diff": int(difficulty_level),
+            "is_first": True
+        }
+        
+        orchestrator_prompt = f"""Gen first Q for teen. Follow system instructions for topic-based reasoning.
+
+Ctx: {json.dumps(context_json, separators=(',', ':'))}
+
+Task: Analyze topic → Select dimension (ALWAYS "Basic Preferences" for first Q) → Gen Q (teen-appropriate, positive, educational)
+
+Return JSON: {{"question": "...", "dimension": "...", "reasoning": "...", "difficulty_level": 1}}"""
+        
+        # Call orchestrator with rate limit retry logic
+        loop = asyncio.get_event_loop()
+        orchestrator_response = None
+        max_retries = 3
+        retry_delay = 2  # Start with 2 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                orchestrator_response = await loop.run_in_executor(
+                    None,
+                    orchestrator.run,
+                    orchestrator_prompt
+                )
+                break  # Success, exit retry loop
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error
+                if "rate limit" in error_str.lower() or "tpm" in error_str.lower() or "rpm" in error_str.lower():
+                    if attempt < max_retries - 1:
+                        # Extract wait time from error if available
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"[PRE-GEN FIRST-Q] Rate limit hit for topic: {topic}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"[PRE-GEN FIRST-Q] Rate limit error after {max_retries} attempts for topic: {topic}")
+                        return None
+                else:
+                    # Not a rate limit error, re-raise
+                    print(f"[PRE-GEN FIRST-Q] Error calling orchestrator for topic: {topic}: {e}")
+                    return None
+        
+        if not orchestrator_response or not orchestrator_response.content:
+            print(f"[PRE-GEN FIRST-Q] Orchestrator returned empty response for topic: {topic}")
+            return None
+        
+        # Parse JSON response
+        orchestrator_content = (orchestrator_response.content or '').strip()
+        orchestrator_content = re.sub(r'```json\s*', '', orchestrator_content)
+        orchestrator_content = re.sub(r'```\s*', '', orchestrator_content)
+        orchestrator_content = orchestrator_content.strip()
+        
+        # Extract JSON object
+        start_idx = orchestrator_content.find('{')
+        if start_idx == -1:
+            print(f"[PRE-GEN FIRST-Q] No JSON found in orchestrator response for topic: {topic}")
+            return None
+        
+        brace_count = 0
+        end_idx = start_idx
+        for i in range(start_idx, len(orchestrator_content)):
+            if orchestrator_content[i] == '{':
+                brace_count += 1
+            elif orchestrator_content[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+        
+        if brace_count != 0:
+            print(f"[PRE-GEN FIRST-Q] Unclosed JSON in orchestrator response for topic: {topic}")
+            return None
+        
+        orchestrator_content = orchestrator_content[start_idx:end_idx]
+        orchestrator_data = json.loads(orchestrator_content)
+        
+        # Extract data
+        question_text = (orchestrator_data.get('question') or '').strip()
+        dimension = (orchestrator_data.get('dimension') or '').strip()
+        reasoning = orchestrator_data.get('reasoning', '') or None
+        if reasoning:
+            reasoning = str(reasoning).strip() or None
+        orchestrator_difficulty = orchestrator_data.get('difficulty_level', difficulty_level)
+        
+        if not question_text or not dimension:
+            print(f"[PRE-GEN FIRST-Q] Missing required fields for topic: {topic}")
+            return None
+        
+        # Generate TTS audio
+        audio_base64 = None
+        try:
+            clean_text_for_speech = question_text.replace('\n\n', '. ').replace('\n', ' ')
+            audio_base64 = await loop.run_in_executor(
+                None,
+                text_to_speech_base64,
+                clean_text_for_speech
+            )
+            if audio_base64:
+                print(f"[PRE-GEN FIRST-Q] Generated audio for topic: {topic} ({len(audio_base64)} characters base64)")
+        except Exception as e:
+            print(f"[PRE-GEN FIRST-Q] Warning: Failed to generate audio for topic {topic}: {e}")
+        
+        # Prepare cached data (without turn_id - will be created when used)
+        cached_data = {
+            "question": question_text,
+            "dimension": dimension,
+            "reasoning": reasoning,
+            "difficulty_level": orchestrator_difficulty,
+            "audio_base64": audio_base64
+        }
+        
+        # Cache it
+        cache_first_question(cache_key, cached_data)
+        print(f"[PRE-GEN FIRST-Q] Successfully pre-generated and cached first question for topic: {topic}")
+        
+        # Remove from in-progress tracking
+        with first_question_lock:
+            if cache_key in first_question_in_progress:
+                del first_question_in_progress[cache_key]
+        
+        return cached_data
+        
+    except Exception as e:
+        print(f"[PRE-GEN FIRST-Q] Error pre-generating first question for topic {topic}: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Remove from in-progress tracking on error
+        with first_question_lock:
+            if cache_key in first_question_in_progress:
+                del first_question_in_progress[cache_key]
+        
+        return None
+
+async def pre_generate_all_first_questions(user_id: str, difficulty_level: int = 1):
+    """
+    Pre-generate first questions for ALL topics in the background.
+    Called after user login to prepare questions for instant topic selection.
+    Uses staggered execution to avoid rate limits.
+    """
+    topics = ['gaming', 'food', 'hobbies', 'youtube', 'weekend']
+    
+    print(f"[PRE-GEN ALL] Starting pre-generation for all topics for user: {user_id}")
+    
+    # Process topics sequentially with delays to avoid rate limits
+    # This is slower but prevents hitting OpenAI rate limits
+    successful = 0
+    failed = 0
+    
+    for i, topic in enumerate(topics):
+        try:
+            # Add delay between topics to avoid rate limits (except for first one)
+            if i > 0:
+                await asyncio.sleep(2)  # 2 second delay between topics
+            
+            result = await pre_generate_first_question_for_topic(user_id, topic, difficulty_level)
+            if result:
+                successful += 1
+            else:
+                failed += 1
+        except Exception as e:
+            print(f"[PRE-GEN ALL] Error pre-generating topic {topic}: {e}")
+            failed += 1
+    
+    print(f"[PRE-GEN ALL] Completed: {successful} successful, {failed} failed for user: {user_id}")
+
+async def pre_generate_next_question(
+    user_id: str,
+    topic: str,
+    user_response: str,
+    previous_question: str,
+    previous_turn_id: str,
+    session_id: str,
+    difficulty_level: int = 1
+):
+    """
+    Pre-generate the next question in the background.
+    This function runs asynchronously and caches the result for instant retrieval.
+    """
+    try:
+        print(f"[PRE-GEN] Starting pre-generation for user {user_id}, topic {topic}")
+        
+        # Get conversation history, dimension history, and speech metrics in parallel (with caching)
+        conversation_history = []
+        dimension_history = []
+        speech_metrics = []
+        speech_trends = None
+        try:
+            conversation_history, dimension_history, speech_metrics = await get_user_topic_data_parallel(user_id, topic)
+            speech_trends = analyze_speech_trends(speech_metrics)
+            print(f"[PRE-GEN] Retrieved {len(conversation_history)} conversation turns, {len(dimension_history)} dimensions, and {len(speech_metrics)} speech metrics")
+        except Exception as e:
+            print(f"[PRE-GEN] Warning: Error retrieving history: {e}")
+            import traceback
+            traceback.print_exc()
+            conversation_history = []
+            dimension_history = []
+            speech_metrics = []
+            speech_trends = None
+        
+        # Analyze engagement level based on user response
+        response_length = len(user_response.split())
+        engagement_level = "low"
+        if response_length > 20:
+            engagement_level = "high"
+        elif response_length > 10:
+            engagement_level = "medium"
+        
+        # Build context for orchestrator (using rule-based summarization)
+        history_context = summarize_conversation_history(conversation_history, max_turns=3)
+        
+        # Check if same dimension used 2+ times in a row
+        dimension_warning = ""
+        if dimension_history and len(dimension_history) >= 2:
+            last_two = dimension_history[:2]
+            if last_two[0] == last_two[1]:
+                dimension_warning = f"⚠️ CRITICAL: Last 2 turns used '{last_two[0]}'. You MUST switch to a DIFFERENT dimension now!"
+                print(f"[PRE-GEN] WARNING: Same dimension '{last_two[0]}' used 2 times in a row - forcing switch")
+        
+        dimension_context = ""
+        if dimension_history:
+            dimension_context = f"Recently used dimensions: {', '.join(dimension_history[:5])}\n"
+            if dimension_warning:
+                dimension_context += dimension_warning + "\n"
+            else:
+                dimension_context += "Avoid repeating these dimensions unless it's a natural continuation.\n"
+        
+        # Build speech performance context (compressed format with numeric values)
+        speech_context = ""
+        if speech_trends:
+            recent_clarity_scores = [m.get('clarity_score', 0.0) for m in speech_metrics[:3] if m.get('clarity_score') is not None]
+            avg_clarity = speech_trends['average_clarity']
+            recent_clarity = speech_trends['recent_clarity']
+            avg_pace = speech_trends['average_pace']
+            speech_context = f"Speech: clarity_trend={speech_trends['clarity_trend']}, clarity_avg={avg_clarity:.2f}, clarity_recent={recent_clarity:.2f}, pace_trend={speech_trends['pace_trend']}, pace_avg={avg_pace:.0f}wpm, conf={speech_trends['confidence_level']}, recent_scores={recent_clarity_scores}"
+        elif speech_metrics:
+            recent_clarity = speech_metrics[0].get('clarity_score') if speech_metrics else None
+            if recent_clarity is not None:
+                speech_context = f"Speech: clarity_recent={recent_clarity:.2f} (limited data)"
+        
+        # Build JSON context (Option 4: structured data)
+        try:
+            prev_q = str(previous_question or "")[:100] if previous_question else ""
+            user_resp = str(user_response or "")[:150] if user_response else ""
+            context_json = {
+                "topic": str(topic) if topic else "",
+                "prev_q": prev_q,
+                "user_resp": user_resp,
+                "diff": int(difficulty_level),
+                "eng": str(engagement_level) if engagement_level else "",
+                "history": str(history_context) if history_context else "early conversation",
+                "dims_used": [str(d) for d in (dimension_history[:3] if dimension_history else [])],
+                "speech": str(speech_context) if speech_context else None
+            }
+            context_json_str = json.dumps(context_json, separators=(',', ':'))
+        except Exception as e:
+            print(f"[PRE-GEN] Error building context JSON: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to simpler format
+            context_json_str = f'{{"topic":"{topic}","prev_q":"{str(previous_question or "")[:100]}","user_resp":"{str(user_response or "")[:150]}","diff":{difficulty_level},"eng":"{engagement_level}"}}'
+        
+        # Short task instructions with dimension switching enforcement
+        dims_list = dimension_history[:3] if dimension_history else []
+        dims_str = ', '.join([str(d) for d in dims_list]) if dims_list else 'none'
+        switch_instruction = dimension_warning if dimension_warning else f"Select dimension (avoid: {dims_str})"
+        
+        orchestrator_prompt = f"""Gen follow-up Q. Follow system instructions for continue conversation reasoning.
+
+Ctx: {context_json_str}
+
+Task: Analyze response → {switch_instruction} → Adjust difficulty → Gen Q (ack+personal+question, match tone, vary ack, don't repeat prev_q)
+
+Return JSON: {{"question": "...", "dimension": "...", "reasoning": "...", "difficulty_level": 1}}"""
+
+        # Call orchestrator with rate limit retry logic
+        loop = asyncio.get_event_loop()
+        reasoning = None
+        orchestrator_response = None
+        max_retries = 3
+        retry_delay = 2  # Start with 2 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                orchestrator_response = await loop.run_in_executor(
+                    None,
+                    orchestrator.run,
+                    orchestrator_prompt
+                )
+                
+                if not orchestrator_response or not orchestrator_response.content:
+                    raise ValueError("Orchestrator returned empty response")
+                
+                print(f"[PRE-GEN] Orchestrator response received (length: {len(orchestrator_response.content)} chars)")
+                break  # Success, exit retry loop
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error
+                if "rate limit" in error_str.lower() or "tpm" in error_str.lower() or "rpm" in error_str.lower():
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"[PRE-GEN] Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"[PRE-GEN] Rate limit error after {max_retries} attempts, skipping pre-generation")
+                        return None
+                else:
+                    # Not a rate limit error, re-raise
+                    print(f"[PRE-GEN] Error calling orchestrator: {e}")
+                    return None
+        
+        try:
+            
+            # Parse JSON response from orchestrator
+            orchestrator_content = (orchestrator_response.content or '').strip()
+            
+            # Remove markdown code blocks if present
+            orchestrator_content = re.sub(r'```json\s*', '', orchestrator_content)
+            orchestrator_content = re.sub(r'```\s*', '', orchestrator_content)
+            orchestrator_content = orchestrator_content.strip()
+            
+            # Extract JSON object
+            start_idx = orchestrator_content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in orchestrator response")
+            
+            brace_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(orchestrator_content)):
+                if orchestrator_content[i] == '{':
+                    brace_count += 1
+                elif orchestrator_content[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if brace_count != 0:
+                raise ValueError("Unclosed JSON object in orchestrator response")
+            
+            orchestrator_content = orchestrator_content[start_idx:end_idx]
+            
+            # Parse JSON
+            orchestrator_data = json.loads(orchestrator_content)
+            
+            # Validate required fields
+            if 'question' not in orchestrator_data or not orchestrator_data.get('question'):
+                raise ValueError("Orchestrator response missing 'question' field")
+            if 'dimension' not in orchestrator_data or not orchestrator_data.get('dimension'):
+                raise ValueError("Orchestrator response missing 'dimension' field")
+            
+            # Extract data (with None safety)
+            question_text = (orchestrator_data.get('question') or '').strip()
+            dimension = (orchestrator_data.get('dimension') or '').strip()
+            reasoning = orchestrator_data.get('reasoning', '') or None
+            if reasoning:
+                reasoning = str(reasoning).strip() or None
+            orchestrator_difficulty = orchestrator_data.get('difficulty_level', difficulty_level)
+            
+            # Validate that we have required fields
+            if not question_text:
+                raise ValueError("Orchestrator response 'question' field is empty or None")
+            if not dimension:
+                raise ValueError("Orchestrator response 'dimension' field is empty or None")
+            
+            # Clean up question text
+            question_text = (question_text or '').strip()
+            question_text = re.sub(r'^(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
+            
+            if (question_text.startswith('"') and question_text.endswith('"')) or \
+               (question_text.startswith("'") and question_text.endswith("'")):
+                question_text = question_text[1:-1].strip()
+            
+            if question_text.startswith('**') and question_text.endswith('**'):
+                question_text = question_text[2:-2].strip()
+            
+            question_text = (question_text or '').strip()
+            
+            # Format follow-up questions
+            formatted_question = question_text
+            if re.search(r'\.\s+([A-Z][a-z])', question_text):
+                formatted_question = re.sub(r'\.\s+([A-Z][a-z])', r'.\n\n\1', question_text)
+            elif re.search(r'([!?])\s+([A-Z][a-z])', question_text):
+                formatted_question = re.sub(r'([!?])\s+([A-Z][a-z])', r'\1\n\n\2', question_text)
+            elif re.search(r',\s+([A-Z][a-z])', question_text):
+                formatted_question = re.sub(r',\s+([A-Z][a-z])', r',\n\n\1', question_text)
+            
+            # Generate audio for the question
+            audio_base64 = None
+            try:
+                clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
+                audio_base64 = await loop.run_in_executor(
+                    None,
+                    text_to_speech_base64,
+                    clean_text_for_speech
+                )
+                if audio_base64:
+                    print(f"[PRE-GEN] Generated audio for question ({len(audio_base64)} characters base64)")
+            except Exception as e:
+                print(f"[PRE-GEN] Warning: Failed to generate audio: {e}")
+            
+            # Use orchestrator's difficulty level
+            final_difficulty = orchestrator_difficulty if orchestrator_difficulty != difficulty_level else difficulty_level
+            
+            # Create cache entry
+            cache_key = get_cache_key(user_id, topic, previous_turn_id)
+            question_data = {
+                "question": formatted_question,
+                "dimension": dimension,
+                "reasoning": reasoning,
+                "difficulty_level": final_difficulty,
+                "audio_base64": audio_base64,
+                "turn_id": None  # Will be set when retrieved
+            }
+            
+            # Cache the question
+            cache_question(cache_key, question_data)
+            print(f"[PRE-GEN] ===== PRE-GENERATION SUCCESS =====")
+            print(f"[PRE-GEN] Cache Key: {cache_key}")
+            print(f"[PRE-GEN] Question: {formatted_question[:100]}...")
+            print(f"[PRE-GEN] Dimension: {dimension}")
+            print(f"[PRE-GEN] Difficulty: {final_difficulty}")
+            print(f"[PRE-GEN] Audio Generated: {audio_base64 is not None}")
+            print(f"[PRE-GEN] Current cache size: {len(question_cache)} entries")
+            print(f"[PRE-GEN] ==================================")
+            
+        except Exception as e:
+            print(f"[PRE-GEN] Error pre-generating question: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't raise - this is background task, failures shouldn't affect main flow
+    
+    except Exception as e:
+        print(f"[PRE-GEN] Fatal error in pre-generation: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.post("/api/continue_conversation", response_model=QuestionOnlyResponse)
 async def continue_conversation(request: ContinueConversationRequest):
     """
     Generate a follow-up question based on previous context using conversation tools.
     The orchestrator chooses the dimension, and the conversation agent uses tools to generate contextual follow-ups.
+    First checks cache for pre-generated question, otherwise generates on-demand.
     """
     try:
         if not request.user_response:
             raise HTTPException(status_code=400, detail="user_response is required for follow-up questions")
         
-        # Update previous turn with user response (if previous_turn_id provided)
+        # Check cache for pre-generated question first
+        print(f"[CONTINUE] Checking cache for user_id={request.user_id}, topic={request.topic}, previous_turn_id={request.previous_turn_id}")
         if request.previous_turn_id:
-            try:
-                # Determine response type (for now, assume custom_speech or custom_text)
-                # Frontend should indicate if it was a selected option
-                response_type = "custom_speech"  # Default, can be updated based on frontend input
-                updated_turn = update_conversation_turn_with_response(
-                    turn_id=request.previous_turn_id,
-                    user_response=request.user_response,
-                    response_type=response_type
-                )
-                if updated_turn:
-                    print(f"Updated previous turn {request.previous_turn_id} with user response")
-                else:
-                    print(f"Warning: Failed to update previous turn {request.previous_turn_id}")
-            except Exception as e:
-                print(f"Warning: Error updating previous turn: {e}")
-                # Continue even if update fails
+            cache_key = get_cache_key(request.user_id, request.topic, request.previous_turn_id)
+            print(f"[CONTINUE] Cache key: {cache_key}")
+            print(f"[CONTINUE] Current cache entries: {list(question_cache.keys())}")
+            cached_question = get_cached_question(cache_key)
+            
+            if cached_question:
+                print(f"[CACHE HIT] Returning pre-generated question for user {request.user_id}, topic {request.topic}")
+                
+                # Need to create turn in database and get turn_id
+                turn_id = None
+                try:
+                    session_topic = get_or_create_session_topic(request.session_id, request.topic)
+                    if session_topic:
+                        session_topic_id = str(session_topic['id'])
+                        current_turn = get_current_turn(session_topic_id)
+                        turn_number = 1
+                        if current_turn:
+                            turn_number = current_turn.get('turn_number', 0) + 1
+                        
+                        conversation_turn = create_conversation_turn(
+                            session_topic_id=session_topic_id,
+                            turn_number=turn_number,
+                            dimension=cached_question['dimension'],
+                            difficulty_level=cached_question['difficulty_level'],
+                            question=cached_question['question']
+                        )
+                        
+                        if conversation_turn:
+                            turn_id = str(conversation_turn['id'])
+                            # Update cached question with turn_id
+                            cached_question['turn_id'] = turn_id
+                            print(f"[CACHE HIT] Created turn {turn_number} (ID: {turn_id}) for cached question")
+                except Exception as e:
+                    print(f"[CACHE HIT] Warning: Error creating turn for cached question: {e}")
+                    # Continue with cached question even if turn creation fails
+                
+                return {
+                    "question": cached_question['question'],
+                    "dimension": cached_question['dimension'],
+                    "audio_base64": cached_question.get('audio_base64'),
+                    "turn_id": turn_id,
+                    "reasoning": cached_question.get('reasoning')
+                }
+            else:
+                print(f"[CACHE MISS] No pre-generated question found for key: {cache_key}, generating on-demand")
         
-        # Orchestrator chooses dimension based on user response and engagement
-        # For now, randomly select a dimension (can be enhanced with orchestrator logic later)
-        dimension = random.choice(DIMENSIONS)
-        print(f"Continuing conversation. Selected dimension: {dimension}")
-        print(f"User response: {request.user_response}")
+        # OPTIMIZATION 1: Parallelize Previous Turn Update + Data Fetching
+        # Start both operations in parallel
+        update_task = None
+        if request.previous_turn_id:
+            async def update_previous_turn():
+                try:
+                    response_type = "custom_speech"
+                    updated_turn = update_conversation_turn_with_response(
+                        turn_id=request.previous_turn_id,
+                        user_response=request.user_response,
+                        response_type=response_type
+                    )
+                    if updated_turn:
+                        print(f"Updated previous turn {request.previous_turn_id} with user response")
+                    else:
+                        print(f"Warning: Failed to update previous turn {request.previous_turn_id}")
+                except Exception as e:
+                    print(f"Warning: Error updating previous turn: {e}")
+            
+            update_task = asyncio.create_task(update_previous_turn())
         
-        # Use conversation agent with tools to generate follow-up question
-        # The agent will use get_context and generate_followup_question tools
-        prompt = (
-            f"Generate a FOLLOW-UP question using your tools.\n\n"
-            f"First, use get_context with:\n"
-            f"- user_response: '{request.user_response}'\n"
-            f"- current_dimension: '{dimension}'\n"
-            f"- topic: '{request.topic}'\n"
-            f"- previous_question: '{request.previous_question}'\n\n"
-            f"Then, use generate_followup_question with the same parameters to create a contextual follow-up.\n\n"
-            f"CRITICAL REQUIREMENTS - EMOTIONAL TONE MATCHING:\n"
-            f"- FIRST, analyze the emotional tone of the user's response: '{request.user_response}'\n"
-            f"- If the user expresses FRUSTRATION, DIFFICULTY, or NEGATIVE feelings:\n"
-            f"  * DO NOT use cheerful acknowledgements like 'It's cool!' or 'That's awesome!'\n"
-            f"  * Instead use EMPATHETIC acknowledgements like 'I understand that can be frustrating', 'That sounds tough', 'I can see how that would be challenging'\n"
-            f"  * Match the personal preference to the tone (e.g., 'I can relate', 'That's tough', 'I understand')\n"
-            f"- If the user expresses POSITIVE feelings (happy, excited, enthusiastic):\n"
-            f"  * Use positive acknowledgements like 'That's great!', 'Awesome!', 'Cool!', 'That sounds fun!'\n"
-            f"  * Match the personal preference to the tone (e.g., 'I like that too', 'That sounds fun', 'That's cool')\n"
-            f"- If the user's tone is NEUTRAL (matter-of-fact, informative):\n"
-            f"  * Use neutral acknowledgements like 'I see', 'Got it', 'Interesting', 'That makes sense'\n"
-            f"  * Match the personal preference to the tone (e.g., 'That makes sense', 'I understand', 'I see')\n"
-            f"- Use 'Acknowledgement + Personal Preference + Question' format\n"
-            f"- Format: 'Acknowledgement + short personal preference' on first line, blank line, then question on next line\n"
-            f"- VARY your acknowledgement - use a different phrase than you might have used before\n"
-            f"- NEVER repeat the previous question: '{request.previous_question}'\n"
-            f"- Ask about a DIFFERENT aspect or angle of what the user mentioned\n"
-            f"- Be about the specific things mentioned in the user's response\n"
-            f"- Adapt to the {dimension} dimension\n"
-            f"- Be natural and conversational for a teen"
-        )
+        # Get conversation history, dimension history, and speech metrics in parallel (with caching)
+        conversation_history = []
+        dimension_history = []
+        speech_metrics = []
+        speech_trends = None
+        try:
+            # Get user_id from request or session
+            user_id = request.user_id
+            if not user_id and request.session_id:
+                # Try to get user_id from session
+                session_response = supabase.table('sessions').select('user_id').eq('id', request.session_id).limit(1).execute()
+                if session_response.data:
+                    user_id = session_response.data[0].get('user_id')
+            
+            if user_id:
+                conversation_history, dimension_history, speech_metrics = await get_user_topic_data_parallel(user_id, request.topic)
+                speech_trends = analyze_speech_trends(speech_metrics)
+                print(f"Retrieved {len(conversation_history)} conversation turns, {len(dimension_history)} dimensions, and {len(speech_metrics)} speech metrics for user {user_id}, topic {request.topic}")
+                if speech_trends:
+                    print(f"Speech trends: clarity={speech_trends['clarity_trend']}, pace={speech_trends['pace_trend']}, confidence={speech_trends['confidence_level']}")
+        except Exception as e:
+            print(f"Warning: Error retrieving conversation/dimension/speech history: {e}")
+            import traceback
+            traceback.print_exc()
+            conversation_history = []
+            dimension_history = []
+            speech_metrics = []
+            speech_trends = None
         
-        # Run conversation agent (it will use the tools)
-        response = conversation_agent.run(prompt)
+        # Analyze engagement level based on user response
+        response_length = len(request.user_response.split())
+        engagement_level = "low"
+        if response_length > 20:
+            engagement_level = "high"
+        elif response_length > 10:
+            engagement_level = "medium"
         
-        # ===== DIAGNOSTIC LOGGING =====
-        print("\n" + "="*80)
-        print("[DEBUG] RAW AGENT RESPONSE DIAGNOSTICS")
-        print("="*80)
-        print(f"[DEBUG] Response type: {type(response)}")
-        print(f"[DEBUG] Response class: {response.__class__.__name__}")
+        # OPTIMIZATION 2: Reduce Orchestrator Prompt Size
+        # Build context for orchestrator (using rule-based summarization) - REDUCED
+        history_context = summarize_conversation_history(conversation_history, max_turns=2)  # Reduced from 3 to 2
         
-        # Check for content attribute
-        if hasattr(response, 'content'):
-            raw_content = response.content
-            print(f"[DEBUG] Raw response content length: {len(raw_content)} characters")
-            print(f"[DEBUG] Raw response content (first 500 chars): {repr(raw_content[:500])}")
-            print(f"[DEBUG] Raw response content (last 200 chars): {repr(raw_content[-200:])}")
-            print(f"[DEBUG] Raw response ends with punctuation: {raw_content.strip()[-1] if raw_content.strip() else 'N/A'} in {['.', '!', '?']}")
-        else:
-            print(f"[DEBUG] Response has no 'content' attribute")
-            print(f"[DEBUG] Available attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+        # Build speech performance context (ULTRA-COMPRESSED format)
+        speech_context = ""
+        if speech_trends:
+            # Only include essential metrics: trend and recent clarity
+            speech_context = f"sp:tr={speech_trends['clarity_trend'][:1]},cl={speech_trends['recent_clarity']:.2f}"  # e.g., "sp:tr=i,cl=0.88"
+        elif speech_metrics:
+            recent_clarity = speech_metrics[0].get('clarity_score') if speech_metrics else None
+            if recent_clarity is not None:
+                speech_context = f"sp:cl={recent_clarity:.2f}"  # e.g., "sp:cl=0.85"
         
-        # Check for finish reason or truncation indicators
-        if hasattr(response, 'finish_reason'):
-            print(f"[DEBUG] Finish reason: {response.finish_reason}")
-        if hasattr(response, 'usage'):
-            print(f"[DEBUG] Token usage: {response.usage}")
-        if hasattr(response, 'truncated'):
-            print(f"[DEBUG] Truncated flag: {response.truncated}")
-        if hasattr(response, 'model'):
-            print(f"[DEBUG] Model used: {response.model}")
+        # Use orchestrator to analyze user response, check engagement, review dimension history, and select next dimension
+        print(f"[ORCHESTRATOR] Calling orchestrator for continue conversation - topic: {request.topic}")
         
-        # Check response object structure
-        print(f"[DEBUG] Response object attributes: {[attr for attr in dir(response) if not attr.startswith('_') and not callable(getattr(response, attr, None))]}")
+        # Build JSON context (REDUCED sizes)
+        try:
+            # Reduced truncation: prev_q from 100 to 60, user_resp from 150 to 80
+            prev_q = str(request.previous_question or "")[:60] if request.previous_question else ""
+            user_resp = str(request.user_response or "")[:80] if request.user_response else ""
+            
+            # Reduce history context length
+            history_str = str(history_context) if history_context else "early"
+            if len(history_str) > 100:
+                history_str = history_str[:100] + "..."
+            
+            context_json = {
+                "t": str(request.topic)[:20],  # topic shortened
+                "pq": prev_q,  # prev_q (already truncated)
+                "ur": user_resp,  # user_resp (already truncated)
+                "d": int(request.difficulty_level),  # diff shortened
+                "e": str(engagement_level)[:1],  # eng shortened to first char (l/m/h)
+                "h": history_str,  # history (truncated)
+                "du": [str(d)[:15] for d in (dimension_history[:2] if dimension_history else [])],  # dims_used: only 2, truncated
+                "s": speech_context if speech_context else None  # speech (ultra-compressed)
+            }
+            context_json_str = json.dumps(context_json, separators=(',', ':'))
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Error building context JSON: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to simpler format
+            context_json_str = f'{{"t":"{request.topic[:20]}","pq":"{str(request.previous_question or "")[:60]}","ur":"{str(request.user_response or "")[:80]}","d":{request.difficulty_level},"e":"{engagement_level[0]}"}}'
         
-        # Try to get text content in different ways
-        if hasattr(response, 'get_content_as_string'):
-            try:
-                content_str = response.get_content_as_string()
-                print(f"[DEBUG] get_content_as_string() length: {len(content_str)} characters")
-            except Exception as e:
-                print(f"[DEBUG] get_content_as_string() error: {e}")
+        # Check if same dimension used 2+ times in a row
+        dimension_warning = ""
+        if dimension_history and len(dimension_history) >= 2:
+            last_two = dimension_history[:2]
+            if last_two[0] == last_two[1]:
+                dimension_warning = f"⚠️ CRITICAL: Last 2 turns used '{last_two[0]}'. MUST switch to DIFFERENT dimension!"
+                print(f"[ORCHESTRATOR] WARNING: Same dimension '{last_two[0]}' used 2 times in a row - forcing switch")
         
-        if hasattr(response, 'text'):
-            print(f"[DEBUG] response.text length: {len(response.text)} characters")
+        # Short task instructions with dimension switching enforcement
+        dims_str = ','.join([str(d)[:10] for d in dimension_history[:2]]) if dimension_history else 'none'
+        switch_instruction = dimension_warning if dimension_warning else f"Select dimension (avoid: {dims_str})"
         
-        if hasattr(response, 'message'):
-            print(f"[DEBUG] response.message type: {type(response.message)}")
+        orchestrator_prompt = f"""Gen follow-up Q. Follow system instructions.
+
+Ctx: {context_json_str}
+
+Task: Analyze → {switch_instruction} → Gen Q (ack+personal+question, match tone, don't repeat)
+
+Return JSON: {{"question":"...","dimension":"...","reasoning":"...","difficulty_level":1}}"""
+
+        # Call orchestrator
+        loop = asyncio.get_event_loop()
+        reasoning = None  # Initialize reasoning
+        try:
+            orchestrator_response = None
+            max_retries = 3
+            retry_delay = 2  # Start with 2 seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    orchestrator_response = await loop.run_in_executor(
+                        None,
+                        orchestrator.run,
+                        orchestrator_prompt
+                    )
+                    
+                    if not orchestrator_response or not orchestrator_response.content:
+                        raise ValueError("Orchestrator returned empty response")
+                    
+                    print(f"[ORCHESTRATOR] Received response (length: {len(orchestrator_response.content)} chars)")
+                    print(f"[ORCHESTRATOR] Raw response preview: {orchestrator_response.content[:200]}...")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    error_str = str(e)
+                    # Check if it's a rate limit error
+                    if "rate limit" in error_str.lower() or "tpm" in error_str.lower() or "rpm" in error_str.lower():
+                        if attempt < max_retries - 1:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            print(f"[ORCHESTRATOR] Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            raise HTTPException(
+                                status_code=429,
+                                detail=f"Rate limit exceeded. Please try again in a few moments."
+                            )
+                    else:
+                        # Not a rate limit error, re-raise
+                        raise
+            
+            # Parse JSON response from orchestrator
+            orchestrator_content = (orchestrator_response.content or '').strip()
+            
+            # Remove markdown code blocks if present
+            orchestrator_content = re.sub(r'```json\s*', '', orchestrator_content)
+            orchestrator_content = re.sub(r'```\s*', '', orchestrator_content)
+            orchestrator_content = orchestrator_content.strip()
+            
+            # Extract JSON object
+            start_idx = orchestrator_content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in orchestrator response")
+            
+            brace_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(orchestrator_content)):
+                if orchestrator_content[i] == '{':
+                    brace_count += 1
+                elif orchestrator_content[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if brace_count != 0:
+                raise ValueError("Unclosed JSON object in orchestrator response")
+            
+            orchestrator_content = orchestrator_content[start_idx:end_idx]
+            
+            # Parse JSON
+            orchestrator_data = json.loads(orchestrator_content)
+            
+            # Validate required fields
+            if 'question' not in orchestrator_data or not orchestrator_data.get('question'):
+                raise ValueError("Orchestrator response missing 'question' field")
+            if 'dimension' not in orchestrator_data or not orchestrator_data.get('dimension'):
+                raise ValueError("Orchestrator response missing 'dimension' field")
+            
+            # Extract data (with None safety)
+            question_text = (orchestrator_data.get('question') or '').strip()
+            dimension = (orchestrator_data.get('dimension') or '').strip()
+            reasoning = orchestrator_data.get('reasoning', '') or None
+            if reasoning:
+                reasoning = str(reasoning).strip() or None
+            orchestrator_difficulty = orchestrator_data.get('difficulty_level', request.difficulty_level)
+            
+            # Validate that we have required fields
+            if not question_text:
+                raise ValueError("Orchestrator response 'question' field is empty or None")
+            if not dimension:
+                raise ValueError("Orchestrator response 'dimension' field is empty or None")
+            
+            # Validate dimension (log warning if not in list, but allow flexibility)
+            if dimension not in DIMENSIONS and dimension != "Basic Preferences":
+                print(f"[ORCHESTRATOR] WARNING: Dimension '{dimension}' not in standard list. Allowing flexibility.")
+            else:
+                print(f"[ORCHESTRATOR] Dimension '{dimension}' validated against standard list.")
+            
+            # Log detailed orchestrator decisions
+            print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")
+            print(f"[ORCHESTRATOR] Topic: {request.topic}")
+            print(f"[ORCHESTRATOR] User Response: {request.user_response[:100]}...")
+            print(f"[ORCHESTRATOR] Engagement Level: {engagement_level} ({response_length} words)")
+            print(f"[ORCHESTRATOR] Dimension History: {dimension_history[:5] if dimension_history else 'None'}")
+            if speech_trends:
+                print(f"[ORCHESTRATOR] Speech Performance:")
+                print(f"[ORCHESTRATOR]   - Clarity Trend: {speech_trends['clarity_trend']}")
+                print(f"[ORCHESTRATOR]   - Average Clarity: {speech_trends['average_clarity']}")
+                print(f"[ORCHESTRATOR]   - Confidence Level: {speech_trends['confidence_level']}")
+                print(f"[ORCHESTRATOR]   - Recent Clarity: {speech_trends['recent_clarity']}")
+            else:
+                print(f"[ORCHESTRATOR] Speech Performance: No data available")
+            print(f"[ORCHESTRATOR] Chosen Dimension: {dimension}")
+            print(f"[ORCHESTRATOR] Chosen Difficulty Level: {orchestrator_difficulty}")
+            print(f"[ORCHESTRATOR] Requested Difficulty Level: {request.difficulty_level}")
+            if reasoning:
+                print(f"[ORCHESTRATOR] Reasoning: {reasoning}")
+            else:
+                print(f"[ORCHESTRATOR] WARNING: Reasoning field missing (optional but preferred)")
+            print(f"[ORCHESTRATOR] Generated Question: {question_text[:200]}...")
+            print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")
+            
+            # Use orchestrator's difficulty level if different from requested
+            final_difficulty = orchestrator_difficulty if orchestrator_difficulty != request.difficulty_level else request.difficulty_level
+            if orchestrator_difficulty != request.difficulty_level:
+                print(f"[ORCHESTRATOR] Using orchestrator's difficulty level {orchestrator_difficulty} instead of requested {request.difficulty_level}")
+            
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse orchestrator JSON response: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            print(f"[ORCHESTRATOR] Raw response: {orchestrator_response.content if orchestrator_response else 'No response'}")
+            error_detail = f"{error_msg} | Response preview: {orchestrator_response.content[:200] if orchestrator_response else 'No response'}"
+            print(f"[ORCHESTRATOR] Full error detail: {error_detail}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_detail
+            )
+        except ValueError as e:
+            error_msg = f"Orchestrator validation error: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            print(f"[ORCHESTRATOR] Raw response: {orchestrator_response.content if orchestrator_response else 'No response'}")
+            error_detail = f"{error_msg} | Response preview: {orchestrator_response.content[:200] if orchestrator_response else 'No response'}"
+            raise HTTPException(
+                status_code=500,
+                detail=error_detail
+            )
+        except Exception as e:
+            error_msg = f"Orchestrator execution error: {str(e)}"
+            print(f"[ORCHESTRATOR] ERROR: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=error_msg
+            )
         
-        print("="*80 + "\n")
-        # ===== END DIAGNOSTIC LOGGING =====
+        # Clean up question text (minimal, preserve natural flow)
+        question_text = (question_text or '').strip()
         
-        question_text = response.content.strip()
-        
-        print(f"[DEBUG] After .strip(), question_text length: {len(question_text)} characters")
-        print(f"[DEBUG] After .strip(), question_text (first 300 chars): {repr(question_text[:300])}")
-        
-        # Preserve the full response for TTS - don't aggressively strip content
         # Only remove very specific instruction prefixes
         question_text = re.sub(r'^(?:here\'?s|here is|you could ask|try asking|question:?)\s*', '', question_text, flags=re.IGNORECASE)
         
@@ -870,38 +2236,51 @@ async def continue_conversation(request: ContinueConversationRequest):
         if question_text.startswith('**') and question_text.endswith('**'):
             question_text = question_text[2:-2].strip()
         
-        # Final cleanup - minimal, preserve the natural flow
-        question_text = question_text.strip()
-        
-        print(f"[DEBUG] After final cleanup, question_text length: {len(question_text)} characters")
-        print(f"[DEBUG] After final cleanup, question_text: {repr(question_text)}")
+        # Final cleanup
+        question_text = (question_text or '').strip()
         
         # Format follow-up questions: Split acknowledgement+preference and question into separate lines
         # New pattern: "Acknowledgement + personal preference" on first line, question on next line
-        # Look for patterns like "That's great! I like that too. Do you..." or "Cool! That sounds fun. What do you..."
-        # The personal preference ends with a period, then the question starts with a capital letter
         formatted_question = question_text
         
         # Try to detect acknowledgement + personal preference + question pattern
         # Pattern 1: Period followed by space and capital letter (e.g., "That's great! I like that too. Do you...")
-        # This handles the case where personal preference ends with period and question starts
-        # Check for period pattern first since it's more specific to the new format
         if re.search(r'\.\s+([A-Z][a-z])', question_text):
-            # Split on period followed by space and capital letter
-            # This will split after the personal preference, before the question
             formatted_question = re.sub(r'\.\s+([A-Z][a-z])', r'.\n\n\1', question_text)
         # Pattern 2: Exclamation mark followed by space and capital letter (e.g., "That's great! Do you...")
-        # This handles cases where there's no personal preference or it's very short
         elif re.search(r'([!?])\s+([A-Z][a-z])', question_text):
-            # Split on exclamation/question mark followed by space and capital letter
             formatted_question = re.sub(r'([!?])\s+([A-Z][a-z])', r'\1\n\n\2', question_text)
         # Pattern 3: Comma followed by space and capital letter (less common but possible)
         elif re.search(r',\s+([A-Z][a-z])', question_text):
             formatted_question = re.sub(r',\s+([A-Z][a-z])', r',\n\n\1', question_text)
         
         print(f"[DEBUG] After formatting, formatted_question length: {len(formatted_question)} characters")
-        print(f"[DEBUG] After formatting, formatted_question: {repr(formatted_question)}")
-        print(f"Generated follow-up question: {formatted_question}")
+        print(f"[DEBUG] After formatting, formatted_question: {repr(formatted_question[:200])}...")
+        print(f"Generated follow-up question: {formatted_question[:200]}...")
+        
+        # OPTIMIZATION 3: Return Question Before TTS
+        # Generate TTS audio in background (non-blocking) - use formatted_question
+        audio_base64 = None
+        audio_task = None
+        
+        async def generate_audio_background():
+            try:
+                clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
+                loop = asyncio.get_event_loop()
+                audio = await loop.run_in_executor(
+                    None,
+                    text_to_speech_base64,
+                    clean_text_for_speech
+                )
+                if audio:
+                    print(f"Generated audio for question in background ({len(audio)} characters base64)")
+                return audio
+            except Exception as e:
+                print(f"Warning: Failed to generate audio in background: {e}")
+                return None
+        
+        # Start TTS generation in background (don't wait)
+        audio_task = asyncio.create_task(generate_audio_background())
         
         # Save new conversation turn to database
         turn_id = None
@@ -923,7 +2302,7 @@ async def continue_conversation(request: ContinueConversationRequest):
                     session_topic_id=session_topic_id,
                     turn_number=turn_number,
                     dimension=dimension,
-                    difficulty_level=request.difficulty_level,
+                    difficulty_level=final_difficulty,
                     question=formatted_question
                 )
                 
@@ -938,24 +2317,34 @@ async def continue_conversation(request: ContinueConversationRequest):
             traceback.print_exc()
             # Continue even if database save fails
         
-        # Generate audio for the question using text-to-speech
+        # OPTIMIZATION 3: Return Question Before TTS
+        # Wait for previous turn update to complete (if it was started)
+        if update_task:
+            try:
+                await update_task
+            except Exception as e:
+                print(f"Warning: Previous turn update task failed: {e}")
+        
+        # Try to get audio if it's ready (wait up to 1 second)
         audio_base64 = None
-        try:
-            # Remove newlines for TTS (keep the text clean for speech)
-            clean_text_for_speech = formatted_question.replace('\n\n', '. ').replace('\n', ' ')
-            loop = asyncio.get_event_loop()
-            audio_base64 = await loop.run_in_executor(
-                None,
-                text_to_speech_base64,
-                clean_text_for_speech
-            )
-            if audio_base64:
-                print(f"Generated audio for follow-up question ({len(audio_base64)} characters base64)")
-        except Exception as e:
-            print(f"Warning: Failed to generate audio for follow-up question: {e}")
-            # Don't fail the request if audio generation fails
-            
-        return {"question": formatted_question, "dimension": dimension, "audio_base64": audio_base64, "turn_id": turn_id}
+        if audio_task:
+            try:
+                audio_base64 = await asyncio.wait_for(audio_task, timeout=1.0)
+                if audio_base64:
+                    print(f"[OPTIMIZED] Audio ready before return ({len(audio_base64)} characters base64)")
+            except asyncio.TimeoutError:
+                print(f"[OPTIMIZED] Audio not ready in 1s, returning question without audio (will be generated in background)")
+                # Audio will continue generating in background
+            except Exception as e:
+                print(f"Warning: Audio generation failed: {e}")
+        
+        return {
+            "question": formatted_question,
+            "dimension": dimension,
+            "audio_base64": audio_base64,  # May be None if TTS still generating
+            "turn_id": turn_id,
+            "reasoning": reasoning
+        }
     except Exception as e:
         print(f"Error continuing conversation: {e}")
         import traceback
@@ -1179,6 +2568,16 @@ async def analyze_speech(request: SpeechAnalysisRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing speech: {str(e)}")
 
+@app.get("/api/debug/cache-status")
+async def get_cache_status():
+    """Debug endpoint to check cache status"""
+    with cache_lock:
+        return {
+            "cache_size": len(question_cache),
+            "cache_keys": list(question_cache.keys()),
+            "expiry_times": {k: str(v) for k, v in cache_expiry.items()}
+        }
+
 @app.post("/api/process-audio", response_model=SpeechAnalysisResponse)
 async def process_audio(
     audio: UploadFile = File(...),
@@ -1344,6 +2743,94 @@ async def process_audio(
                 print(f"Warning: No turn_id provided, skipping speech analysis database save")
             
             print(f"Audio processed successfully, file size: {file_size} bytes")
+            
+            # Trigger background pre-generation of next question if we have all required info
+            print(f"[PRE-GEN] Checking if pre-generation should be triggered...")
+            print(f"[PRE-GEN] turn_id: {turn_id}, transcript: {analysis_data.get('transcript', '')[:50] if analysis_data.get('transcript') else 'None'}...")
+            if turn_id and analysis_data.get('transcript'):
+                try:
+                    # Get conversation turn details to extract user_id, topic, previous_question
+                    # We need to query the database to get these details
+                    if supabase:
+                        turn_response = supabase.table('conversation_turns')\
+                            .select('id, question, session_topic_id, dimension')\
+                            .eq('id', turn_id)\
+                            .limit(1)\
+                            .execute()
+                        
+                        if turn_response.data and len(turn_response.data) > 0:
+                            turn_data = turn_response.data[0]
+                            previous_question = turn_data.get('question', '')
+                            session_topic_id = turn_data.get('session_topic_id')
+                            
+                            if session_topic_id and previous_question:
+                                # Get session_topic to get topic and session_id
+                                topic_response = supabase.table('session_topics')\
+                                    .select('topic_name, session_id')\
+                                    .eq('id', session_topic_id)\
+                                    .limit(1)\
+                                    .execute()
+                                
+                                if topic_response.data and len(topic_response.data) > 0:
+                                    topic_data = topic_response.data[0]
+                                    topic = topic_data.get('topic_name', '')
+                                    session_id = topic_data.get('session_id', '')
+                                    
+                                    # Get user_id from session
+                                    if session_id:
+                                        session_response = supabase.table('sessions')\
+                                            .select('user_id')\
+                                            .eq('id', session_id)\
+                                            .limit(1)\
+                                            .execute()
+                                        
+                                        if session_response.data and len(session_response.data) > 0:
+                                            user_id = session_response.data[0].get('user_id', '')
+                                            
+                                            if user_id and topic:
+                                                # Trigger background pre-generation
+                                                cache_key = get_cache_key(user_id, topic, turn_id)
+                                                print(f"[PRE-GEN] ===== TRIGGERING PRE-GENERATION =====")
+                                                print(f"[PRE-GEN] User ID: {user_id}")
+                                                print(f"[PRE-GEN] Topic: {topic}")
+                                                print(f"[PRE-GEN] Previous Question: {previous_question[:100]}...")
+                                                print(f"[PRE-GEN] Previous Turn ID: {turn_id}")
+                                                print(f"[PRE-GEN] User Response: {analysis_data['transcript'][:100]}...")
+                                                print(f"[PRE-GEN] Cache Key: {cache_key}")
+                                                print(f"[PRE-GEN] ======================================")
+                                                
+                                                # Create background task
+                                                task = asyncio.create_task(pre_generate_next_question(
+                                                    user_id=user_id,
+                                                    topic=topic,
+                                                    user_response=analysis_data['transcript'],
+                                                    previous_question=previous_question,
+                                                    previous_turn_id=turn_id,
+                                                    session_id=session_id,
+                                                    difficulty_level=1  # Default, can be retrieved from turn if needed
+                                                ))
+                                                print(f"[PRE-GEN] Background task created (task: {task}, done: {task.done()})")
+                                                print(f"[PRE-GEN] Background task started (non-blocking)")
+                                            else:
+                                                print(f"[PRE-GEN] Missing user_id or topic, skipping pre-generation")
+                                        else:
+                                            print(f"[PRE-GEN] Could not find session for session_id: {session_id}")
+                                    else:
+                                        print(f"[PRE-GEN] Missing session_id, skipping pre-generation")
+                                else:
+                                    print(f"[PRE-GEN] Could not find session_topic for session_topic_id: {session_topic_id}")
+                            else:
+                                print(f"[PRE-GEN] Missing session_topic_id or previous_question, skipping pre-generation")
+                        else:
+                            print(f"[PRE-GEN] Could not find conversation_turn for turn_id: {turn_id}")
+                    else:
+                        print(f"[PRE-GEN] Supabase not available, skipping pre-generation")
+                except Exception as e:
+                    print(f"[PRE-GEN] Error triggering pre-generation: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Don't fail the request if pre-generation fails
+            
             return analysis_data
             
         except (json.JSONDecodeError, ValueError) as e:

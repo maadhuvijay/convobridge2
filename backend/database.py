@@ -537,6 +537,238 @@ def get_conversation_history_for_user_topic(user_id: str, topic_name: str, limit
         return []
 
 
+def get_recent_speech_metrics_for_user_topic(user_id: str, topic_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Get recent speech analysis metrics for a user-topic combination.
+    Returns conversation turns with speech analysis data (clarity_score, pace_wpm, etc.).
+    
+    Args:
+        user_id: The user's UUID
+        topic_name: The topic name (e.g., 'Gaming', 'Weekend plans', 'food', 'Food')
+        limit: Maximum number of recent turns to retrieve (default: 5)
+    
+    Returns:
+        List of conversation turn dictionaries with speech metrics, ordered by most recent first.
+        Each turn includes clarity_score, pace_wpm, wer_estimate, filler_words, dimension, and turn_number.
+        Only returns turns that have speech analysis data (clarity_score is not null).
+    """
+    if not supabase:
+        return []
+    
+    try:
+        # Get all sessions for this user
+        sessions_response = supabase.table('sessions').select('id').eq('user_id', user_id).execute()
+        
+        if not sessions_response.data:
+            return []
+        
+        session_ids = [s['id'] for s in sessions_response.data]
+        
+        # Get all conversation turns with speech analysis for this topic
+        all_turns = []
+        for session_id in session_ids:
+            # Get session topics
+            topics_response = supabase.table('session_topics')\
+                .select('id, topic_name')\
+                .eq('session_id', session_id)\
+                .execute()
+            
+            if not topics_response.data:
+                continue
+            
+            # Filter topics by case-insensitive match
+            matching_topics = [
+                t for t in topics_response.data 
+                if t.get('topic_name', '').lower() == topic_name.lower()
+            ]
+            
+            for topic in matching_topics:
+                topic_id = topic['id']
+                # Get conversation turns with speech analysis (clarity_score is not null)
+                turns_response = supabase.table('conversation_turns')\
+                    .select('id, turn_number, dimension, clarity_score, pace_wpm, wer_estimate, filler_words, question_asked_at')\
+                    .eq('session_topic_id', topic_id)\
+                    .not_.is_('clarity_score', 'null')\
+                    .order('question_asked_at', desc=True)\
+                    .execute()
+                
+                if turns_response.data:
+                    all_turns.extend(turns_response.data)
+        
+        # Sort by question_asked_at (most recent first) and limit
+        all_turns.sort(key=lambda x: x.get('question_asked_at', ''), reverse=True)
+        
+        # Return the most recent turns (up to limit)
+        result = all_turns[:limit]
+        print(f"Returning {len(result)} speech metrics for user {user_id}, topic {topic_name}")
+        return result
+    except Exception as e:
+        print(f"Error getting speech metrics for user {user_id}, topic {topic_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def analyze_speech_trends(speech_metrics: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Analyze speech performance trends from recent metrics.
+    
+    Args:
+        speech_metrics: List of conversation turn dictionaries with speech metrics
+    
+    Returns:
+        Dictionary with trend analysis including:
+        - clarity_trend: "improving", "declining", or "stable"
+        - pace_trend: "improving", "declining", or "stable"
+        - average_clarity: Average clarity score
+        - average_pace: Average pace in WPM
+        - recent_clarity: Most recent clarity score
+        - confidence_level: Overall confidence assessment
+        Returns None if insufficient data (< 3 metrics)
+    """
+    if not speech_metrics or len(speech_metrics) < 3:
+        return None
+    
+    try:
+        # Extract clarity scores and pace (most recent first, so reverse for trend calculation)
+        clarity_scores = [m.get('clarity_score', 0.0) for m in reversed(speech_metrics) if m.get('clarity_score') is not None]
+        pace_scores = [m.get('pace_wpm', 0) for m in reversed(speech_metrics) if m.get('pace_wpm') is not None]
+        
+        if len(clarity_scores) < 3:
+            return None
+        
+        # Calculate trends using simple linear regression approach
+        # Compare first half vs second half
+        mid_point = len(clarity_scores) // 2
+        first_half_avg = sum(clarity_scores[:mid_point]) / len(clarity_scores[:mid_point])
+        second_half_avg = sum(clarity_scores[mid_point:]) / len(clarity_scores[mid_point:])
+        
+        clarity_diff = second_half_avg - first_half_avg
+        if clarity_diff > 0.05:  # 5% improvement threshold
+            clarity_trend = "improving"
+        elif clarity_diff < -0.05:  # 5% decline threshold
+            clarity_trend = "declining"
+        else:
+            clarity_trend = "stable"
+        
+        # Calculate pace trend if we have pace data
+        pace_trend = "stable"
+        if len(pace_scores) >= 3:
+            mid_point_pace = len(pace_scores) // 2
+            first_half_pace = sum(pace_scores[:mid_point_pace]) / len(pace_scores[:mid_point_pace])
+            second_half_pace = sum(pace_scores[mid_point_pace:]) / len(pace_scores[mid_point_pace:])
+            
+            pace_diff = second_half_pace - first_half_pace
+            if pace_diff > 10:  # 10 WPM improvement threshold
+                pace_trend = "improving"
+            elif pace_diff < -10:  # 10 WPM decline threshold
+                pace_trend = "declining"
+        
+        # Calculate averages
+        average_clarity = sum(clarity_scores) / len(clarity_scores)
+        average_pace = sum(pace_scores) / len(pace_scores) if pace_scores else None
+        recent_clarity = clarity_scores[-1] if clarity_scores else None
+        
+        # Calculate confidence level based on average clarity
+        if average_clarity >= 0.85:
+            confidence_level = "high"
+        elif average_clarity >= 0.70:
+            confidence_level = "medium"
+        else:
+            confidence_level = "low"
+        
+        return {
+            "clarity_trend": clarity_trend,
+            "pace_trend": pace_trend,
+            "average_clarity": round(average_clarity, 2),
+            "average_pace": round(average_pace, 0) if average_pace else None,
+            "recent_clarity": round(recent_clarity, 2) if recent_clarity else None,
+            "confidence_level": confidence_level,
+            "metric_count": len(speech_metrics)
+        }
+    except Exception as e:
+        print(f"Error analyzing speech trends: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def get_dimension_history_for_user_topic(user_id: str, topic_name: str, limit: int = 10) -> List[str]:
+    """
+    Get dimension history for a user-topic combination.
+    Returns a list of dimensions used in previous conversation turns, ordered by most recent first.
+    
+    Args:
+        user_id: The user's UUID
+        topic_name: The topic name (e.g., 'Gaming', 'Weekend plans', 'food', 'Food')
+        limit: Maximum number of recent dimensions to retrieve (default: 10)
+    
+    Returns:
+        List of dimension strings, ordered by most recent first.
+    """
+    if not supabase:
+        return []
+    
+    try:
+        # Get all sessions for this user
+        sessions_response = supabase.table('sessions').select('id').eq('user_id', user_id).execute()
+        
+        if not sessions_response.data:
+            return []
+        
+        session_ids = [s['id'] for s in sessions_response.data]
+        
+        # Get all dimensions for this topic across all sessions
+        all_dimensions = []
+        for session_id in session_ids:
+            # Get session topics
+            topics_response = supabase.table('session_topics')\
+                .select('id, topic_name')\
+                .eq('session_id', session_id)\
+                .execute()
+            
+            if not topics_response.data:
+                continue
+            
+            # Filter topics by case-insensitive match
+            matching_topics = [
+                t for t in topics_response.data 
+                if t.get('topic_name', '').lower() == topic_name.lower()
+            ]
+            
+            for topic in matching_topics:
+                topic_id = topic['id']
+                # Get dimensions from conversation turns for this topic
+                turns_response = supabase.table('conversation_turns')\
+                    .select('dimension, question_asked_at')\
+                    .eq('session_topic_id', topic_id)\
+                    .not_.is_('dimension', 'null')\
+                    .order('question_asked_at', desc=True)\
+                    .execute()
+                
+                if turns_response.data:
+                    for turn in turns_response.data:
+                        dimension = turn.get('dimension')
+                        if dimension:
+                            all_dimensions.append({
+                                'dimension': dimension,
+                                'question_asked_at': turn.get('question_asked_at', '')
+                            })
+        
+        # Sort by question_asked_at (most recent first)
+        all_dimensions.sort(key=lambda x: x.get('question_asked_at', ''), reverse=True)
+        
+        # Extract just the dimension strings and limit
+        result = [d['dimension'] for d in all_dimensions[:limit]]
+        print(f"Returning {len(result)} dimensions for user {user_id}, topic {topic_name}: {result}")
+        return result
+    except Exception as e:
+        print(f"Error getting dimension history for user {user_id}, topic {topic_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 def get_current_session_topic(session_id: str) -> Optional[Dict[str, Any]]:
     """
     Get the current active session topic (most recently active).

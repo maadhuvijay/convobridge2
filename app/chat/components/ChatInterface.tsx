@@ -1,6 +1,6 @@
 'use client';
 
-import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi, Circle, Star, Sparkles, Trophy, X, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bot, Volume2, Mic, BookOpen, Activity, Signal, Wifi, Circle, Star, Sparkles, Trophy, X, RefreshCw, ChevronDown, ChevronUp, Coins, Loader2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -52,6 +52,9 @@ export function ChatInterface() {
   const [vocabChallengeCompleted, setVocabChallengeCompleted] = useState(false); // Track if challenge is completed
   const [showReturningUserOptions, setShowReturningUserOptions] = useState(isReturningUser && lastTopic); // Show options for returning users
   const [showExitDialog, setShowExitDialog] = useState(false); // Track exit confirmation dialog
+  // Pre-generation Status State
+  const [isPreGenerationReady, setIsPreGenerationReady] = useState<boolean>(false);
+  const [preGenerationStatus, setPreGenerationStatus] = useState<'checking' | 'ready' | 'timeout' | 'failed'>('checking');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const vocabAudioRef = useRef<HTMLAudioElement | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState({
@@ -395,6 +398,108 @@ export function ChatInterface() {
     strengths: string[];
     suggestions: string[];
   } | null>(null);
+
+  // Poll pre-generation status when speech analysis appears
+  useEffect(() => {
+    if (!speechAnalysis || !currentTopic) {
+      return;
+    }
+
+    // Use currentTurnId as previousTurnId if previousTurnId is not set yet
+    const effectivePreviousTurnId = previousTurnId || currentTurnId;
+    
+    if (!effectivePreviousTurnId) {
+      // If we don't have a turn ID at all, enable button after timeout
+      console.log('[PRE-GEN] No turn ID available, will enable after timeout');
+      const timeoutId = setTimeout(() => {
+        setIsPreGenerationReady(true);
+        setPreGenerationStatus('timeout');
+      }, 4000);
+      
+      return () => {
+        clearTimeout(timeoutId);
+      };
+    }
+
+    // Reset status when speech analysis appears
+    setIsPreGenerationReady(false);
+    setPreGenerationStatus('checking');
+
+    let pollInterval: NodeJS.Timeout | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isMounted = true;
+
+    // Timeout: Enable after 4 seconds regardless
+    timeoutId = setTimeout(() => {
+      if (isMounted && !isPreGenerationReady) {
+        console.log('[PRE-GEN] Timeout reached (4s), enabling button');
+        setIsPreGenerationReady(true);
+        setPreGenerationStatus('timeout');
+      }
+    }, 4000);
+
+    // Poll every 500ms to check if pre-generation is ready
+    const checkPreGenerationStatus = async () => {
+      if (!isMounted || !currentTopic || !effectivePreviousTurnId) {
+        return;
+      }
+
+      try {
+        const response = await fetch('http://localhost:8000/api/check_pre_generation_status', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            topic: currentTopic,
+            previous_turn_id: effectivePreviousTurnId
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('[PRE-GEN] Status check failed:', response.status);
+          return;
+        }
+
+        const data = await response.json();
+        
+        if (data.ready && isMounted) {
+          console.log('[PRE-GEN] Question is ready!');
+          setIsPreGenerationReady(true);
+          setPreGenerationStatus('ready');
+          
+          // Clear polling and timeout
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        }
+      } catch (error) {
+        console.error('[PRE-GEN] Error checking status:', error);
+        // On error, don't block - let timeout handle it
+      }
+    };
+
+    // Start polling immediately, then every 500ms
+    checkPreGenerationStatus();
+    pollInterval = setInterval(checkPreGenerationStatus, 500);
+
+    // Cleanup
+    return () => {
+      isMounted = false;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [speechAnalysis, currentTopic, previousTurnId, currentTurnId, userId]);
 
   // Function to generate rephrased sentence using vocabulary word
   const generateRephrasedSentence = (transcript: string, vocabWord: string): string => {
@@ -955,6 +1060,10 @@ export function ChatInterface() {
             setClarityPointsAnimation(false);
           }, 1500);
         }
+        
+        // Reset pre-generation status when new speech analysis appears
+        setIsPreGenerationReady(false);
+        setPreGenerationStatus('checking');
       }
       
       // Reset timer and clear error on success
@@ -1391,7 +1500,7 @@ export function ChatInterface() {
           <div className="relative mt-6 p-5 rounded-2xl bg-gradient-to-br from-cyan/10 via-cyan/5 to-transparent backdrop-blur-xl border border-cyan/30 shadow-[0_0_25px_rgba(0,229,255,0.2)] hover:shadow-[0_0_35px_rgba(0,229,255,0.3)] transition-all duration-300 overflow-hidden">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-cyan font-mono text-sm tracking-widest uppercase flex items-center gap-2">
-                <Star className={`w-5 h-5 text-cyan fill-cyan/30 ${pointsAnimation ? 'animate-spin scale-125' : ''} transition-all duration-300`} />
+                <Coins className={`w-5 h-5 text-yellow-400 fill-yellow-400/40 ${pointsAnimation ? 'animate-spin scale-125' : ''} transition-all duration-300`} />
                 Earn Brownie Points
               </h3>
             </div>
@@ -1514,6 +1623,15 @@ export function ChatInterface() {
                                   });
                                   
                                   if (!stateRes.ok) {
+                                    // 404 means no previous conversation for this topic - this is OK, just continue
+                                    if (stateRes.status === 404) {
+                                      console.log(`No previous conversation found for topic '${lastTopic}', starting fresh`);
+                                      // Continue with the topic anyway (start fresh conversation)
+                                      const topicId = TOPICS.find(t => t.label.toLowerCase() === lastTopic.toLowerCase())?.id || lastTopic.toLowerCase();
+                                      await handleTopicSelect(topicId);
+                                      return;
+                                    }
+                                    // For other errors, throw
                                     throw new Error(`Failed to get previous topic state: ${stateRes.status}`);
                                   }
                                   
@@ -1647,10 +1765,24 @@ export function ChatInterface() {
               <div className="relative ml-auto">
                 <button
                   onClick={handleContinueChat}
-                  className="px-8 py-4 rounded-xl bg-cyan/10 border-2 border-cyan/70 text-cyan font-bold text-base hover:bg-cyan/20 hover:border-cyan hover:text-cyan shadow-[0_0_25px_rgba(0,229,255,0.5)] hover:shadow-[0_0_35px_rgba(0,229,255,0.7)] transition-all duration-300 flex items-center justify-center gap-2 group whitespace-nowrap animate-pulse"
+                  disabled={!isPreGenerationReady}
+                  className={`px-8 py-4 rounded-xl border-2 font-bold text-base transition-all duration-300 flex items-center justify-center gap-2 group whitespace-nowrap ${
+                    isPreGenerationReady
+                      ? 'bg-cyan/10 border-cyan/70 text-cyan hover:bg-cyan/20 hover:border-cyan hover:text-cyan shadow-[0_0_25px_rgba(0,229,255,0.5)] hover:shadow-[0_0_35px_rgba(0,229,255,0.7)] animate-pulse cursor-pointer'
+                      : 'bg-black/50 border-cyan/30 text-cyan/50 shadow-none cursor-not-allowed'
+                  }`}
                 >
-                  <span>Continue Chat</span>
-                  <Star className="w-5 h-5 text-cyan fill-cyan/50 group-hover:animate-pulse" />
+                  {!isPreGenerationReady ? (
+                    <>
+                      <Loader2 className="w-5 h-5 text-cyan/50 animate-spin" />
+                      <span>Preparing next question...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Continue Chat</span>
+                      <Star className="w-5 h-5 text-cyan fill-cyan/50 group-hover:animate-pulse" />
+                    </>
+                  )}
                 </button>
                 {/* Points Animation - appears near Continue Chat button */}
                 {continueChatPointsAnimation && (
@@ -1800,7 +1932,7 @@ export function ChatInterface() {
                         <span className="text-xs font-bold tracking-widest uppercase">
                             {isGeneratingVocabAudio ? 'Preparing...' : 'Hear me say'}
                         </span>
-                        <Star className={`w-4 h-4 text-cyan fill-cyan/30 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard) || isGeneratingVocabAudio) ? 'animate-pulse' : ''}`} />
+                        <Coins className={`w-4 h-4 text-yellow-400 fill-yellow-400/40 ${(isPlayingVocabAudio || (speechAnalysis && !vocabHeard) || isGeneratingVocabAudio) ? 'animate-pulse' : ''}`} />
                     </button>
               {/* Points Animation - appears near Hear me say button */}
               {hearMeSayPointsAnimation && (
@@ -1887,6 +2019,7 @@ export function ChatInterface() {
                               <>
                                 <Mic className="w-4 h-4" />
                                 <span className="text-xs font-bold tracking-widest uppercase">Start Recording</span>
+                                <Coins className="w-4 h-4 text-yellow-400 fill-yellow-400/40" />
                               </>
                             )}
                           </button>
