@@ -217,11 +217,16 @@ The **Orchestrator Team** is the central coordination point for all agent intera
 **Responsibilities**:
 - Receive user requests from the API
 - Analyze requests with **contextual awareness** of user state and history
+- **Intelligent Dimension Selection**: Choose conversation dimensions based on:
+  - Topic characteristics and user history
+  - User engagement level (response length, detail, enthusiasm)
+  - Speech performance metrics (clarity trends, pace, confidence)
+  - Dimension history (avoid repetition, enforce max 2 consecutive turns on same dimension)
 - Determine which sub-agents to involve based on **contextual relevance**
-- Delegate tasks to appropriate sub-agents
+- Delegate tasks to appropriate sub-agents with topic-specific guidance
 - Synthesize responses from multiple agents
 - Provide a unified, **contextually relevant** response to the user
-- Choose conversation dimensions based on user engagement and responses
+- Return structured JSON with question, dimension, reasoning, and difficulty_level
 
 **Configuration**:
 - **Model**: OpenAI GPT-4o-mini (optimized for performance)
@@ -229,11 +234,18 @@ The **Orchestrator Team** is the central coordination point for all agent intera
 - **Members**: Conversation Agent, Response Agent, Vocabulary Agent
 
 **Key Instructions**:
-- Friendly and supportive team leader
+- Friendly and supportive team leader with strong reasoning capabilities
+- **Topic-Based Reasoning**: Analyzes user-chosen topics to determine best conversation approach
+- **Dimension Selection Rules**:
+  - CRITICAL: Do NOT use the same dimension for more than 2 consecutive turns
+  - If last 2 turns used same dimension, MUST switch to different dimension
+  - Analyze dimension history and actively rotate through dimensions
+  - Consider speech performance trends when selecting dimensions
 - Delegates to Conversation Agent when topics are chosen
 - Uses **contextual awareness** to choose appropriate dimensions for follow-up questions
 - Ensures **contextual relevance** in all generated content
 - Synthesizes member responses with attention to conversation flow
+- Returns JSON: `{"question": "...", "dimension": "...", "reasoning": "...", "difficulty_level": 1}`
 
 ### Conversation Agent
 
@@ -374,10 +386,13 @@ Frontend displays follow-up question + auto-plays audio
 **Location**: `backend/subagents/response_generate_agent.py`
 
 **Responsibilities**:
-- Generate **contextually relevant** response options based on question and dimension
+- Generate **contextually relevant** response options based on question, dimension, and **topic**
+- **Topic-Aware Generation**: Options MUST be specifically relevant to the topic (gaming→games, food→food, hobbies→hobbies)
 - Create 2 response options plus "Choose your own response"
 - Adapt to conversation dimension for **contextual relevance**
-- Ensure responses are simple and direct
+- Use user's previous response context when available for personalized options
+- Ensure responses are simple and direct (Level 1 difficulty)
+- **Aggressive Topic Enforcement**: NO generic options that could apply to any topic
 
 **Configuration**:
 - **Model**: OpenAI GPT-4o-mini
@@ -493,7 +508,8 @@ Start a conversation by generating a **contextually relevant** initial question 
 {
   "topic": "gaming",
   "user_id": "uuid-here",
-  "difficulty_level": 1
+  "difficulty_level": 1,
+  "session_id": "session-uuid"
 }
 ```
 
@@ -501,13 +517,16 @@ Start a conversation by generating a **contextually relevant** initial question 
 - `topic` (string, required): The conversation topic (e.g., "gaming", "food", "hobbies", "weekend", "youtube")
 - `user_id` (string, required): Unique identifier for the user
 - `difficulty_level` (integer, optional, default: 1): Conversation difficulty level
+- `session_id` (string, required): Session identifier
 
 **Response**:
 ```json
 {
   "question": "What kind of video games do you enjoy playing the most?",
   "dimension": "Basic Preferences",
-  "audio_base64": "base64-encoded-audio-string"
+  "audio_base64": "base64-encoded-audio-string",
+  "turn_id": "turn-uuid",
+  "reasoning": "This question explores gaming preferences, appropriate for a first question."
 }
 ```
 
@@ -515,12 +534,18 @@ Start a conversation by generating a **contextually relevant** initial question 
 - `question` (string): Generated conversation question
 - `dimension` (string): Conversation dimension used (always "Basic Preferences" for first question)
 - `audio_base64` (string, optional): Base64-encoded audio for text-to-speech
+- `turn_id` (string): Conversation turn ID for linking response options and vocabulary
+- `reasoning` (string, optional): Orchestrator's reasoning for dimension selection
 
 **Features**:
+- **Orchestrator-Based**: Uses orchestrator for intelligent topic-based reasoning
+- **Pre-Generation Support**: Checks cache for pre-generated first questions (instant topic selection)
 - Always uses "Basic Preferences" dimension for first question on any topic
+- **Optimized for Returning Users**: Skips history retrieval for first questions (faster response)
 - Uses **contextual awareness** to check if this is the first question for the topic
 - Generates text-to-speech audio automatically
 - Returns question immediately (progressive loading)
+- **Rate Limit Handling**: Automatic retry with exponential backoff
 
 #### POST `/api/continue_conversation`
 Generate a **contextually relevant** follow-up question with **contextual awareness** of user response and conversation history.
@@ -532,7 +557,8 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
   "user_id": "uuid-here",
   "previous_question": "What kind of video games do you enjoy playing?",
   "user_response": "I like playing Super Mario",
-  "difficulty_level": 1
+  "difficulty_level": 1,
+  "previous_turn_id": "turn-uuid"
 }
 ```
 
@@ -542,28 +568,40 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
 - `previous_question` (string, required): The previous question that was asked
 - `user_response` (string, required): The user's response to the previous question
 - `difficulty_level` (integer, optional, default: 1): Conversation difficulty level
+- `previous_turn_id` (string, required): Previous conversation turn ID
 
 **Response**:
 ```json
 {
   "question": "That's great! I like that too.\n\nDo you play alone or with someone?",
   "dimension": "Social Context",
-  "audio_base64": "base64-encoded-audio-string"
+  "audio_base64": "base64-encoded-audio-string",
+  "turn_id": "turn-uuid",
+  "reasoning": "Switching to Social Context to explore gaming interactions, avoiding repetition of Basic Preferences."
 }
 ```
 
 **Response Schema**:
 - `question` (string): Follow-up question with "Acknowledgement + Personal Preference + Question" format
 - `dimension` (string): Conversation dimension chosen by orchestrator (based on **contextual awareness**)
-- `audio_base64` (string, optional): Base64-encoded audio for text-to-speech
+- `audio_base64` (string, optional): Base64-encoded audio for text-to-speech (may be null if TTS still generating)
+- `turn_id` (string): Conversation turn ID for linking response options and vocabulary
+- `reasoning` (string, optional): Orchestrator's reasoning for dimension selection
 
 **Features**:
-- Uses **contextual awareness** tools (`get_context`, `generate_followup_question`)
-- Orchestrator chooses dimension based on user engagement and response
+- **Orchestrator-Based**: Uses orchestrator for intelligent dimension selection and question generation
+- **Dimension Switching Enforcement**: Automatically switches dimension if same dimension used 2+ times consecutively
+- **Speech Performance Integration**: Considers speech metrics (clarity, pace, trends) when selecting dimensions
+- **Pre-Generation Support**: Checks cache for pre-generated questions (instant response after speech analysis)
+- **Optimized Performance**:
+  - Parallelizes orchestrator call + previous turn update
+  - Returns question before TTS completion (TTS continues in background)
+  - Reduced prompt size for faster LLM response
+- Orchestrator analyzes user engagement, dimension history, and speech performance
 - Ensures **contextual relevance** by referencing specific things mentioned by user
 - Varies acknowledgements to maintain natural conversation
 - Never repeats the same question
-- Generates text-to-speech audio automatically
+- **Rate Limit Handling**: Automatic retry with exponential backoff
 
 #### POST `/api/get_conversation_details`
 Background endpoint for loading response options and vocabulary in parallel (progressive loading).
@@ -573,17 +611,27 @@ Background endpoint for loading response options and vocabulary in parallel (pro
 {
   "question": "What kind of video games do you enjoy playing?",
   "topic": "gaming",
+  "turn_id": "turn-uuid",
   "difficulty_level": 1,
-  "dimension": "Basic Preferences"
+  "dimension": "Basic Preferences",
+  "user_response": "I like action games"
 }
 ```
+
+**Request Schema**:
+- `question` (string, required): The conversation question
+- `topic` (string, required): The conversation topic
+- `turn_id` (string, required): Conversation turn ID for saving response options and vocabulary
+- `difficulty_level` (integer, optional, default: 1): Conversation difficulty level
+- `dimension` (string, optional, default: "Basic Preferences"): Conversation dimension
+- `user_response` (string, optional): User's previous response for context-aware options
 
 **Response**:
 ```json
 {
   "response_options": [
-    "I like action games.",
-    "I prefer puzzle games.",
+    "I really enjoy playing action games like Call of Duty.",
+    "I prefer puzzle games because they challenge my mind.",
     "Choose your own response"
   ],
   "vocabulary": {
@@ -596,9 +644,12 @@ Background endpoint for loading response options and vocabulary in parallel (pro
 ```
 
 **Features**:
+- **Topic-Aware Generation**: Response options are specifically relevant to the topic (gaming→games, food→food, etc.)
 - Runs in parallel for performance
-- Generates **contextually relevant** response options based on question and dimension
+- Generates **contextually relevant** response options based on question, dimension, and topic
+- Uses user's previous response context when available for personalized options
 - Generates **contextually relevant** vocabulary word for the specific question
+- Saves response options and vocabulary to database linked to turn_id
 
 #### POST `/api/text_to_speech`
 Generate speech from text using OpenAI's TTS API (on-demand audio generation).
@@ -938,6 +989,56 @@ The system uses a **progressive loading** strategy for optimal UX:
 
 This ensures **contextually relevant** questions appear quickly while maintaining full functionality.
 
+## Pre-Generation System
+
+The system implements intelligent pre-generation to minimize user wait times:
+
+### First Question Pre-Generation
+- **On Login**: Pre-generates first questions for ALL topics in the background
+- **Sequential Processing**: Topics processed one-by-one with 2-second delays to avoid rate limits
+- **Caching**: First questions cached for 30 minutes with user-specific keys
+- **Instant Topic Selection**: When user selects a topic, question is served from cache (instant response)
+- **Race Condition Handling**: If user selects topic before pre-generation completes, system waits up to 10 seconds
+
+### Next Question Pre-Generation
+- **After Speech Analysis**: Automatically pre-generates next follow-up question
+- **Background Processing**: Runs asynchronously after speech analysis completes
+- **Caching**: Questions cached with 5-minute TTL, keyed by user_id + topic + previous_turn_id
+- **Instant Continue Chat**: When user clicks "Continue Chat", question served from cache
+- **Status Polling**: Frontend polls `/api/check_pre_generation_status` to enable button when ready
+- **Hybrid Approach**: Button enables after 4 seconds OR when ready (whichever comes first)
+
+### Cache Management
+- **In-Memory Cache**: Thread-safe dictionary with expiration tracking
+- **Cache Keys**: Normalized (lowercase, trimmed) to ensure consistency
+- **Cache Clearing**: Automatically cleared when user starts new conversation or changes topic
+- **Fallback**: If pre-generation fails or cache miss, system falls back to on-demand generation
+
+## Performance Optimizations
+
+### Database Query Optimization
+- **Parallel Queries**: Conversation history, dimension history, and speech metrics fetched concurrently using `asyncio.gather`
+- **Query Caching**: Database query results cached for 30 seconds to reduce redundant queries
+- **Cache Keys**: User-specific cache keys ensure data consistency
+
+### LLM Token Reduction
+- **Compressed Speech Context**: Ultra-compressed format (e.g., `sp:tr=i,cl=0.88`)
+- **Rule-Based History Summarization**: Concise summaries of conversation history (max 2-3 turns)
+- **Structured JSON Context**: Compact JSON format with shortened field names
+- **Shortened Instructions**: Minimal task instructions referencing system instructions
+- **Truncated Context**: Previous questions and responses truncated to essential length
+
+### Response Time Optimization
+- **Parallel Orchestrator + Database Update**: Previous turn update runs in parallel with orchestrator call
+- **Return Before TTS**: Question returned immediately, TTS continues in background (1-second wait max)
+- **Simplified First Questions**: Returning users skip history retrieval for first questions
+
+### Rate Limit Handling
+- **Automatic Retry**: 3 retry attempts with exponential backoff (2s → 4s → 8s)
+- **Error Detection**: Detects rate limit errors by checking for "rate limit", "tpm", or "rpm" in error messages
+- **Graceful Degradation**: Pre-generation failures don't block user flow (fallback to on-demand)
+- **User-Friendly Errors**: Returns HTTP 429 with clear message for user-facing endpoints
+
 ## Contextual Awareness & Relevance
 
 ### Contextual Awareness Features
@@ -946,21 +1047,81 @@ This ensures **contextually relevant** questions appear quickly while maintainin
    - Maintains user response history
    - Tracks previous questions to avoid repetition
    - Monitors conversation dimensions used
+   - Tracks speech performance metrics and trends
 
 2. **Contextual Relevance in Questions**:
    - Follow-up questions reference specific things mentioned by user
    - Questions adapt to user's interests and responses
    - High **contextual relevance** ensures natural conversation flow
+   - Topic-aware question generation
 
-3. **Dimension Selection**:
+3. **Intelligent Dimension Selection**:
    - Orchestrator uses **contextual awareness** to choose appropriate dimensions
-   - Dimensions adapt based on user engagement and response type
+   - **Dimension Switching Enforcement**: Automatically switches dimension if same dimension used 2+ consecutive turns
+   - Dimensions adapt based on:
+     - User engagement level (response length, detail, enthusiasm)
+     - Speech performance metrics (clarity trends, pace, confidence)
+     - Dimension history (avoid recent repetition)
+     - Topic characteristics
    - Ensures **contextually relevant** follow-up questions
 
-4. **Variety & Naturalness**:
+4. **Speech Performance Feedback Loop**:
+   - Speech analysis metrics influence orchestrator decisions
+   - **Immediate Feedback**: Next question adapts based on recent speech performance
+   - **Trend Analysis**: Analyzes clarity/pace trends over multiple turns
+   - **Adaptive Difficulty**: Adjusts difficulty level based on confidence and clarity trends
+   - **Dimension Adaptation**: Selects dimensions that match user's performance level
+
+5. **Variety & Naturalness**:
    - Varies acknowledgements to avoid repetition
    - Never repeats the same question
    - Maintains **contextual relevance** while keeping conversations fresh
+   - Active dimension rotation prevents getting stuck on one dimension
+
+## Recent Architectural Improvements (v2.1.0)
+
+### Orchestrator Integration
+- **Full Orchestrator Control**: All question generation now goes through orchestrator for intelligent decision-making
+- **Topic-Based Reasoning**: Orchestrator analyzes user-chosen topics and selects appropriate dimensions
+- **Structured JSON Response**: Orchestrator returns `{"question", "dimension", "reasoning", "difficulty_level"}` for transparency
+- **Reasoning Visibility**: Orchestrator's reasoning included in API responses for debugging and transparency
+
+### Dimension Switching Enforcement
+- **Max 2 Consecutive Turns**: System enforces maximum 2 consecutive turns on same dimension
+- **Automatic Detection**: Checks last 2 dimensions in history before generating next question
+- **Forced Switching**: If same dimension detected 2+ times, explicit warning added to orchestrator prompt
+- **Active Rotation**: Ensures conversation variety and prevents getting stuck on one dimension
+
+### Speech Analysis Feedback Loop
+- **Immediate Adaptation**: Next question adapts based on recent speech performance
+- **Trend Analysis**: Analyzes clarity/pace trends over multiple turns
+- **Confidence-Based Selection**: Selects dimensions and adjusts difficulty based on confidence level
+- **Performance Context**: Speech metrics included in orchestrator prompt for informed decisions
+
+### Topic-Aware Response Generation
+- **Topic Context**: Response agent receives topic information in prompt
+- **Aggressive Enforcement**: Short, aggressive prompts ensure topic-specific options
+- **No Generic Options**: System prevents generic responses that could apply to any topic
+- **User Context Integration**: Combines topic awareness with user's previous response for personalized options
+
+### Performance Optimizations
+- **Parallel Database Queries**: Conversation history, dimensions, and speech metrics fetched concurrently
+- **Database Query Caching**: 30-second cache for database query results
+- **LLM Token Reduction**: 
+  - Compressed speech context format
+  - Rule-based history summarization
+  - Structured JSON with shortened field names
+  - Truncated context fields
+- **Response Time Improvements**:
+  - Parallel orchestrator + database update
+  - Return question before TTS completion
+  - Simplified first questions (skip history for returning users)
+
+### Rate Limit Resilience
+- **Automatic Retry**: 3 retry attempts with exponential backoff (2s → 4s → 8s)
+- **Error Detection**: Intelligent detection of rate limit errors
+- **Graceful Degradation**: Pre-generation failures don't block user flow
+- **Sequential Pre-Generation**: First questions generated sequentially with delays to avoid rate limits
 
 ## Future Enhancements
 
@@ -1095,8 +1256,8 @@ When adding new features:
 
 ---
 
-**Last Updated**: 2025-01-16
-**Version**: 2.0.0
+**Last Updated**: 2026-02-17
+**Version**: 2.1.0
 
 ## Key Architectural Concepts
 

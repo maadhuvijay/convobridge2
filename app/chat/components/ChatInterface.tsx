@@ -50,7 +50,7 @@ export function ChatInterface() {
   const [isGeneratingVocabAudio, setIsGeneratingVocabAudio] = useState(false); // Track if audio is being generated
   const [isVocabChallengeExpanded, setIsVocabChallengeExpanded] = useState(false); // Track if bonus challenge is expanded
   const [vocabChallengeCompleted, setVocabChallengeCompleted] = useState(false); // Track if challenge is completed
-  const [showReturningUserOptions, setShowReturningUserOptions] = useState(isReturningUser && lastTopic); // Show options for returning users
+  const [showReturningUserOptions, setShowReturningUserOptions] = useState<boolean>(!!(isReturningUser && lastTopic)); // Show options for returning users
   const [showExitDialog, setShowExitDialog] = useState(false); // Track exit confirmation dialog
   // Pre-generation Status State
   const [isPreGenerationReady, setIsPreGenerationReady] = useState<boolean>(false);

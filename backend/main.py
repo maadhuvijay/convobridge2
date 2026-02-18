@@ -2363,22 +2363,19 @@ async def get_conversation_details(request: ConversationDetailsRequest):
             """Generate response options using the response agent"""
             dimension = request.dimension
             difficulty_level = f"Level {request.difficulty_level}"
+            topic = request.topic or "general conversation"
             
-            # Build prompt with user context if available
+            # Build prompt with topic and user context if available
             if request.user_response:
                 response_prompt = (
-                    f"Generate 2 response options for this question: '{request.question}'. "
-                    f"The dimension is '{dimension}' and difficulty is {difficulty_level}. "
-                    f"IMPORTANT CONTEXT: The user previously said: '{request.user_response}'. "
-                    f"Use this context to generate options that are SPECIFICALLY relevant to what the user mentioned. "
-                    f"Extract key terms, topics, or themes from the user's response and create options that match their specific interests or mentions. "
-                    f"Make responses simple and direct, and ensure they are contextually relevant to the user's previous response."
+                    f"Q: '{request.question}' | Topic: {topic} | Dim: {dimension} | Level: {difficulty_level} | "
+                    f"User said: '{request.user_response}'. "
+                    f"⚠️ Generate options SPECIFICALLY about {topic} AND what user mentioned. NO generic options."
                 )
             else:
                 response_prompt = (
-                    f"Generate 2 response options for this question: '{request.question}'. "
-                    f"The dimension is '{dimension}' and difficulty is {difficulty_level}. "
-                    f"Make responses simple and direct."
+                    f"Q: '{request.question}' | Topic: {topic} | Dim: {dimension} | Level: {difficulty_level}. "
+                    f"⚠️ Generate options SPECIFICALLY about {topic} ONLY. Gaming→games, Food→food, Hobbies→hobbies. NO generic options."
                 )
             
             # Run in thread pool to avoid blocking
