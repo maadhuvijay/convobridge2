@@ -44950,3 +44950,1296 @@ This creates a feedback loop where the system adapts to each user's speech perfo
 
 ---
 
+_**User (2026-02-16 02:56Z)**_
+
+I want to give a demo on this project. I need a agent architecture document appropriate for the demo that describes the orchestrator responsibilities and all agents
+
+---
+
+_**Agent (model default, mode Agent)**_
+
+
+
+---
+
+
+Creating a demo-focused agent architecture document:
+
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: AGENT_FLOW.md</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: backend/orchestrator_agent.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: DEMO_AGENT_ARCHITECTURE.md</summary>
+
+**Chunk 1**
+Lines added: 485, lines removed: 1
+
+```diff
+@@ -1,1 +1,485 @@
+- 
++ # ConvoBridge - Agent Architecture for Demo
++ 
++ **Version**: 2.1.0  
++ **Date**: 2026-02-17  
++ **Purpose**: Demo presentation document
++ 
++ ---
++ 
++ ## Executive Summary
++ 
++ ConvoBridge uses a **multi-agent orchestration system** where an intelligent **Orchestrator Team** coordinates specialized sub-agents to deliver personalized, adaptive conversation practice sessions for autistic youth. Each agent has a specific role, and together they create a seamless, contextually-aware conversation experience.
++ 
++ ---
++ 
++ ## Agent Hierarchy
++ 
++ &#96;&#96;&#96;
++ ┌─────────────────────────────────────────────────────────────┐
++ │              Orchestrator Team (Coordinator)                │
++ │  - Intelligent decision-making                              │
++ │  - Coordinates all sub-agents                                │
++ │  - Adapts to user performance                                │
++ │  - Returns: {question, dimension, reasoning, difficulty}     │
++ └──────────────────┬──────────────────────────────────────────┘
++                     │
++         ┌───────────┼───────────┬──────────────┐
++         │           │           │              │
++         ▼           ▼           ▼              ▼
++ ┌─────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
++ │ Conversation│ │ Response │ │Vocabulary│ │Speech Analysis│
++ │   Agent     │ │  Agent   │ │  Agent   │ │    Agent      │
++ │             │ │          │ │          │ │               │
++ │ Generates   │ │ Generates│ │ Identifies│ │ Analyzes     │
++ │ questions   │ │ response │ │ relevant │ │ speech       │
++ │             │ │ options  │ │ vocab    │ │ performance  │
++ └─────────────┘ └──────────┘ └──────────┘ └──────────────┘
++ &#96;&#96;&#96;
++ 
++ ---
++ 
++ ## 1. Orchestrator Team
++ 
++ **Role**: Intelligent Coordinator &amp; Decision Maker  
++ **Model**: GPT-4o-mini with Reasoning Tools  
++ **Location**: &#96;backend/orchestrator_agent.py&#96;
++ 
++ ### Key Responsibilities
++ 
++ #### 1.1 Topic-Based Reasoning
++ - Analyzes user-chosen topics (Gaming, Food, Hobbies, etc.)
++ - Determines the best conversation approach for each topic
++ - Selects appropriate conversation dimensions based on topic characteristics
++ 
++ #### 1.2 Intelligent Dimension Selection
++ The Orchestrator chooses from **9 conversation dimensions**:
++ - **Basic Preferences**: Likes, dislikes, favorites (always used for first question)
++ - **Depth/Specificity**: Deeper, more detailed questions
++ - **Social Context**: Social aspects of the topic
++ - **Emotional**: Feelings about the topic
++ - **Temporal/Frequency**: When, how often, past experiences
++ - **Comparative**: Comparing different aspects
++ - **Reflective/Why**: Reasons and motivations
++ - **Descriptive/Detail**: Detailed descriptions
++ - **Challenge/Growth**: Challenges and personal growth
++ 
++ **Selection Criteria**:
++ - Topic characteristics
++ - User's conversation history
++ - User engagement level (response length, detail)
++ - **Speech performance metrics** (clarity trends, pace, confidence)
++ - Dimension history (avoids repetition, enforces variety)
++ 
++ #### 1.3 Speech Performance Integration
++ - **Retrieves** speech metrics from database (clarity scores, pace, trends)
++ - **Analyzes** trends: improving, declining, or stable
++ - **Adapts** dimension selection and difficulty based on performance:
++   - **Improving clarity** → Increase challenge, explore new dimensions
++   - **Declining clarity** → Simplify, use familiar dimensions
++   - **High clarity (&gt;0.85)** → User excelling, can increase challenge
++   - **Low clarity (&lt;0.65)** → User struggling, provide more support
++ 
++ #### 1.4 Dimension Switching Enforcement
++ - **Critical Rule**: Never uses the same dimension for more than 2 consecutive turns
++ - Automatically detects if same dimension used 2+ times
++ - Forces switch to different dimension to maintain variety
++ 
++ #### 1.5 Difficulty Level Adjustment
++ - Adjusts difficulty (1-3) based on:
++   - Speech performance trends
++   - Confidence level (high/medium/low)
++   - User engagement patterns
++ 
++ #### 1.6 Sub-Agent Delegation
++ - Delegates to **Conversation Agent** for question generation
++ - Provides context-aware instructions:
++   - Topic-specific guidance
++   - Dimension requirements
++   - Difficulty level
++   - Speech performance adaptation needs
++ 
++ #### 1.7 Output Format
++ Returns structured JSON:
++ &#96;&#96;&#96;json
++ {
++   "question": "What kind of video games do you enjoy playing?",
++   "dimension": "Basic Preferences",
++   "reasoning": "Starting with basic preferences to understand user's interests",
++   "difficulty_level": 1
++ }
++ &#96;&#96;&#96;
++ 
++ ### Decision-Making Process
++ 
++ **For First Questions**:
++ 1. **THINK**: Analyze topic characteristics
++ 2. **ANALYZE**: Consider topic-specific conversation approach
++ 3. **DECIDE**: Always choose "Basic Preferences" dimension
++ 4. **DELEGATE**: Instruct Conversation Agent to generate welcoming first question
++ 
++ **For Follow-Up Questions**:
++ 1. **THINK**: Analyze user response and engagement
++ 2. **ANALYZE**: Review:
++    - Previous questions and dimensions used
++    - User's response content and emotional tone
++    - **Speech performance metrics and trends**
++    - Dimension history (enforce switching if needed)
++ 3. **DECIDE**: 
++    - Select next dimension (adapt based on speech performance)
++    - Adjust difficulty level
++ 4. **DELEGATE**: Instruct Conversation Agent with adaptation guidance
++ 
++ ### Tools Available
++ - **Reasoning Tools**: &#96;think&#96; and &#96;analyze&#96; for complex decision-making
++ - **Sub-Agent Access**: Can delegate to Conversation, Response, Vocabulary, Speech Analysis agents
++ 
++ ---
++ 
++ ## 2. Conversation Agent
++ 
++ **Role**: Question Generator  
++ **Model**: GPT-4o-mini  
++ **Location**: &#96;backend/subagents/conversation_agent.py&#96;
++ 
++ ### Key Responsibilities
++ 
++ #### 2.1 Question Generation
++ - Generates natural, engaging conversation questions
++ - Adapts to 9 conversation dimensions
++ - Ensures questions are teen-appropriate and supportive
++ 
++ #### 2.2 Contextual Awareness
++ - Uses conversation tools to gather context:
++   - Previous questions
++   - User responses
++   - Conversation history
++   - Topic and dimension
++ 
++ #### 2.3 Follow-Up Question Pattern
++ Generates follow-ups using **"Acknowledgement + Personal Preference + Question"** format:
++ - **Acknowledgement**: Recognizes user's response ("That's great!", "I understand")
++ - **Personal Preference**: Adds relatable personal touch ("I like that too", "That sounds fun")
++ - **Question**: Natural follow-up question
++ 
++ **Example**:
++ &gt; "That's great! I like racing games too. Do you play alone or with friends?"
++ 
++ #### 2.4 Contextual Relevance
++ - References specific things mentioned by user
++ - Builds on previous conversation
++ - Never repeats the same question
++ - Varies acknowledgements to maintain natural flow
++ 
++ #### 2.5 Adaptation
++ - Adapts question complexity based on:
++   - Orchestrator's difficulty level
++   - Speech performance trends (from orchestrator)
++   - User engagement level
++ 
++ ### Tools Available
++ - **Conversation Tools**: 
++   - &#96;get_context&#96;: Gathers conversation context
++   - &#96;generate_followup_question&#96;: Generates contextually relevant follow-ups
++ 
++ ---
++ 
++ ## 3. Response Agent
++ 
++ **Role**: Response Option Generator  
++ **Model**: GPT-4o-mini  
++ **Location**: &#96;backend/subagents/response_generate_agent.py&#96;
++ 
++ ### Key Responsibilities
++ 
++ #### 3.1 Response Option Generation
++ - Generates **2 topic-specific response options** for each question
++ - Adds "Choose your own response" as 3rd option
++ - Ensures options are simple and direct (Level 1 difficulty)
++ 
++ #### 3.2 Topic-Aware Generation
++ - **Critical**: Options MUST be specifically relevant to the topic
++ - Gaming → game-related options
++ - Food → food-related options
++ - Hobbies → hobby-related options
++ - **No generic options** that could apply to any topic
++ 
++ #### 3.3 User Context Integration
++ - Considers user's previous response when available
++ - Generates personalized options that reference what user mentioned
++ - Maintains conversation continuity
++ 
++ #### 3.4 Dimension Adaptation
++ - Adapts options to match the conversation dimension
++ - Basic Preferences → Preference-based options
++ - Social Context → Social interaction options
++ - Emotional → Feeling-based options
++ 
++ ### Output Format
++ Returns JSON array:
++ &#96;&#96;&#96;json
++ [
++   "I really enjoy playing action games like Call of Duty.",
++   "I prefer puzzle games because they challenge my mind.",
++   "Choose your own response"
++ ]
++ &#96;&#96;&#96;
++ 
++ ---
++ 
++ ## 4. Vocabulary Agent
++ 
++ **Role**: Vocabulary Word Identifier  
++ **Model**: GPT-4o-mini  
++ **Location**: &#96;backend/subagents/vocabulary_agent.py&#96;
++ 
++ ### Key Responsibilities
++ 
++ #### 4.1 Contextual Vocabulary Selection
++ - Identifies **contextually relevant** vocabulary words from questions
++ - Ensures vocabulary matches the specific question and topic
++ - Selects words that enhance conversation understanding
++ 
++ #### 4.2 Vocabulary Details
++ - Provides word definition
++ - Includes word type (noun, verb, adjective, etc.)
++ - Creates example sentence using the word
++ 
++ #### 4.3 Educational Value
++ - Helps users learn new words relevant to their conversations
++ - Reinforces vocabulary through context
++ - Supports language development
++ 
++ ### Output Format
++ Returns JSON:
++ &#96;&#96;&#96;json
++ {
++   "word": "genre",
++   "type": "noun",
++   "definition": "A category of artistic composition characterized by similarities in form, style, or subject matter.",
++   "example": "My favorite genre of video games is action-adventure."
++ }
++ &#96;&#96;&#96;
++ 
++ ---
++ 
++ ## 5. Speech Analysis Agent
++ 
++ **Role**: Speech Performance Analyzer  
++ **Model**: GPT-4o-mini  
++ **Location**: &#96;backend/subagents/speech_analysis_agent.py&#96;
++ 
++ ### Key Responsibilities
++ 
++ #### 5.1 Speech Transcription
++ - Transcribes user audio using OpenAI Whisper API
++ - Converts speech to text accurately
++ - Handles various audio formats (webm, mp3, wav, m4a)
++ 
++ #### 5.2 Speech Analysis
++ Analyzes transcribed speech for:
++ - **Clarity Score** (0.0 to 1.0): How clear and understandable the speech is
++ - **Word Error Rate (WER)**: How well speech matches expected response
++ - **Speaking Pace**: Words per minute
++ - **Filler Words**: Identifies "um", "uh", "like", etc.
++ 
++ #### 5.3 Feedback Generation
++ - Provides **encouraging feedback** to build confidence
++ - Identifies **strengths** in user's speech
++ - Offers **constructive suggestions** for improvement
++ - Focuses on positive reinforcement
++ 
++ #### 5.4 Performance Metrics
++ Calculates and stores:
++ - Clarity score for trend analysis
++ - Speaking pace for fluency assessment
++ - Filler word count for speech quality
++ - Overall communication effectiveness
++ 
++ ### Output Format
++ Returns JSON:
++ &#96;&#96;&#96;json
++ {
++   "transcript": "I like playing Super Mario",
++   "clarity_score": 0.85,
++   "pace_wpm": 120,
++   "filler_words": ["um"],
++   "feedback": "Great job! Your speech was clear and well-paced.",
++   "strengths": ["Clear pronunciation", "Good pace"],
++   "suggestions": ["Try to reduce filler words"]
++ }
++ &#96;&#96;&#96;
++ 
++ ### Integration with Orchestrator
++ - **Saves metrics to database** after analysis
++ - **Orchestrator retrieves metrics** when generating next question
++ - **Creates feedback loop**: Speech performance influences future questions
++ 
++ ---
++ 
++ ## Agent Interaction Flow
++ 
++ ### Flow 1: First Question Generation
++ 
++ &#96;&#96;&#96;
++ User Selects Topic
++     ↓
++ Orchestrator Team
++     ├─ THINK: Analyze topic
++     ├─ DECIDE: Choose "Basic Preferences" dimension
++     └─ DELEGATE → Conversation Agent
++          └─ Generates first question
++     ↓
++ Returns: {question, dimension, reasoning, difficulty_level}
++     ↓
++ Frontend displays question + audio
++ &#96;&#96;&#96;
++ 
++ ### Flow 2: Follow-Up Question Generation
++ 
++ &#96;&#96;&#96;
++ User Responds
++     ↓
++ Orchestrator Team
++     ├─ THINK: Analyze user response
++     ├─ ANALYZE: 
++     │   ├─ Review dimension history
++     │   ├─ Check speech performance metrics
++     │   └─ Assess engagement level
++     ├─ DECIDE: 
++     │   ├─ Select next dimension (adapt based on speech)
++     │   └─ Adjust difficulty level
++     └─ DELEGATE → Conversation Agent
++          └─ Generates follow-up question
++     ↓
++ Returns: {question, dimension, reasoning, difficulty_level}
++     ↓
++ Frontend displays question + audio
++ &#96;&#96;&#96;
++ 
++ ### Flow 3: Speech Analysis &amp; Feedback Loop
++ 
++ &#96;&#96;&#96;
++ User Records Audio
++     ↓
++ Speech Analysis Agent
++     ├─ Transcribes audio (Whisper)
++     ├─ Analyzes clarity, pace, filler words
++     └─ Generates feedback
++     ↓
++ Saves metrics to database
++     ↓
++ (Next question generation)
++     ↓
++ Orchestrator retrieves metrics
++     ├─ Analyzes trends
++     └─ Adapts next question based on performance
++ &#96;&#96;&#96;
++ 
++ ### Flow 4: Response Options &amp; Vocabulary
++ 
++ &#96;&#96;&#96;
++ Question Displayed
++     ↓
++ Parallel Generation:
++     ├─ Response Agent → Generates 2 topic-specific options
++     └─ Vocabulary Agent → Identifies relevant vocabulary word
++     ↓
++ Frontend displays options + vocabulary
++ &#96;&#96;&#96;
++ 
++ ---
++ 
++ ## Key Features
++ 
++ ### 1. Intelligent Orchestration
++ - Orchestrator makes context-aware decisions
++ - Coordinates all agents seamlessly
++ - Adapts to user performance in real-time
++ 
++ ### 2. Speech Performance Feedback Loop
++ - Speech Analysis Agent analyzes user speech
++ - Metrics stored in database
++ - Orchestrator uses metrics to adapt future questions
++ - Creates personalized learning experience
++ 
++ ### 3. Dimension Variety
++ - 9 conversation dimensions ensure variety
++ - Automatic dimension switching prevents repetition
++ - Adapts dimensions based on speech performance
++ 
++ ### 4. Contextual Awareness
++ - All agents maintain conversation context
++ - Questions reference previous responses
++ - Natural conversation flow
++ 
++ ### 5. Topic-Specific Generation
++ - Response options are topic-specific
++ - Vocabulary words match question context
++ - No generic content
++ 
++ ### 6. Adaptive Difficulty
++ - Adjusts based on speech performance
++ - Increases challenge when user excels
++ - Provides support when user struggles
++ 
++ ---
++ 
++ ## Technical Architecture
++ 
++ ### Agent Communication
++ - **Orchestrator → Conversation Agent**: Direct delegation via Agno Team
++ - **Orchestrator → Response/Vocabulary Agents**: Available but called separately via API
++ - **Speech Analysis Agent → Orchestrator**: Indirect via database (feedback loop)
++ 
++ ### Data Flow
++ - **Question Generation**: Orchestrator → Conversation Agent → Question
++ - **Speech Analysis**: Audio → Speech Analysis Agent → Database → Orchestrator (next question)
++ - **Response Options**: Response Agent (parallel with Vocabulary Agent)
++ - **Vocabulary**: Vocabulary Agent (parallel with Response Agent)
++ 
++ ### Performance Optimizations
++ - **Pre-generation**: Questions pre-generated in background
++ - **Parallel Execution**: Response options and vocabulary generated simultaneously
++ - **Caching**: Speech metrics and conversation history cached
++ - **Token Optimization**: Ultra-compressed prompts for efficiency
++ 
++ ---
++ 
++ ## Demo Highlights
++ 
++ ### What Makes This Special
++ 
++ 1. **Intelligent Adaptation**: System learns from user's speech performance and adapts in real-time
++ 
++ 2. **Multi-Agent Coordination**: Orchestrator seamlessly coordinates 4 specialized agents
++ 
++ 3. **Speech Feedback Loop**: Speech analysis directly influences future questions
++ 
++ 4. **Contextual Awareness**: Every question builds on previous conversation
++ 
++ 5. **Personalized Experience**: Adapts difficulty, dimensions, and complexity to each user
++ 
++ 6. **Topic-Specific**: All content is relevant to chosen topic (no generic responses)
++ 
++ 7. **Variety Enforcement**: Automatic dimension switching ensures engaging conversations
++ 
++ ---
++ 
++ ## Summary
++ 
++ ConvoBridge's agent architecture creates a **self-improving, adaptive conversation system**:
++ 
++ - **Orchestrator** makes intelligent decisions based on multiple data sources
++ - **Conversation Agent** generates contextually relevant questions
++ - **Response Agent** provides topic-specific response options
++ - **Vocabulary Agent** identifies relevant learning words
++ - **Speech Analysis Agent** analyzes performance and creates feedback loop
++ 
++ Together, these agents deliver a **personalized, supportive conversation practice experience** that adapts to each user's unique needs and abilities.
++ 
++ ---
++ 
++ **For Technical Details**: See [DATAFLOW.md](./DATAFLOW.md) and [AGENT_FLOW.md](./AGENT_FLOW.md)  
++ **For Architecture**: See [ARCHITECTURE.md](./ARCHITECTURE.md)  
++ **For Orchestrator-Speech Interaction**: See [ORCHESTRATOR_SPEECH_INTERACTION.md](./ORCHESTRATOR_SPEECH_INTERACTION.md)
++ 
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="generic" data-tool-name="read_lints">
+<details>
+          <summary>Tool use: **read_lints** • Read lints for 1 file</summary>
+      
+Lint paths:
+
+- `DEMO_AGENT_ARCHITECTURE.md`
+
+Lint results
+
+
+**No lint errors found**
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Created a demo-focused agent architecture document (`DEMO_AGENT_ARCHITECTURE.md`). It includes:
+
+## What's Included:
+
+### 1. **Executive Summary**
+- Overview of the multi-agent system
+- Purpose and value proposition
+
+### 2. **Visual Agent Hierarchy**
+- Diagram showing Orchestrator coordinating 4 sub-agents
+- Clear visual structure
+
+### 3. **Detailed Agent Descriptions**
+
+**Orchestrator Team**:
+- 7 responsibilities (topic reasoning, dimension selection, speech integration, etc.)
+- Decision-making process for first and follow-up questions
+- 9 conversation dimensions explained
+- Output format
+
+**Conversation Agent**:
+- Question generation
+- Follow-up question pattern ("Acknowledgement + Personal Preference + Question")
+- Contextual awareness tools
+
+**Response Agent**:
+- Topic-specific response options
+- User context integration
+- Dimension adaptation
+
+**Vocabulary Agent**:
+- Contextual vocabulary selection
+- Educational value
+
+**Speech Analysis Agent**:
+- Speech transcription and analysis
+- Feedback generation
+- Integration with Orchestrator (feedback loop)
+
+### 4. **Agent Interaction Flows**
+- 4 flow diagrams:
+  - First question generation
+  - Follow-up question generation
+  - Speech analysis & feedback loop
+  - Response options & vocabulary
+
+### 5. **Key Features**
+- 6 features highlighted
+- What makes the system special
+
+### 6. **Technical Architecture**
+- Agent communication patterns
+- Data flow
+- Performance optimizations
+
+### 7. **Demo Highlights**
+- 7 points to emphasize during demo
+- What makes this system unique
+
+## Perfect for Demo Because:
+
+- Clear and concise: Easy to understand without technical jargon
+- Visual: Diagrams and flow charts
+- Focused: Emphasizes what each agent does and why it matters
+- Professional: Presentation-ready format
+- Complete: Covers all agents and their relationships
+
+The document is ready for your demo presentation. It explains the orchestrator's responsibilities and how all agents work together to create an adaptive conversation system.
+
+---
+
+_**User (2026-02-16 02:56Z)**_
+
+update the readme with all the completed updates and with current architecture details
+
+---
+
+_**Agent (model default, mode Agent)**_
+
+
+
+---
+
+
+Reviewing README.md and updating it with the latest architecture details and completed updates:
+
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: README.md</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: DEMO_AGENT_ARCHITECTURE.md</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: ARCHITECTURE.md</summary>
+
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Updating README.md with the latest architecture details and completed features:
+
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: README.md</summary>
+
+**Chunk 1**
+Lines added: 116, lines removed: 16
+
+```diff
+@@ -1,36 +1,136 @@
+  # ConvoBridge
+  
+- **ConvoBridge** is a conversation practice platform designed to help autistic youth build confidence in social interactions through structured, AI-powered conversation sessions.
++ **Version**: 2.1.0  
++ **Last Updated**: 2026-02-17
++ 
++ **ConvoBridge** is a conversation practice platform designed to help autistic youth build confidence in social interactions through structured, AI-powered conversation sessions. The system uses an intelligent multi-agent orchestration architecture that adapts to each user's speech performance in real-time.
++ 
++ ---
+  
+  ## 🎯 Overview
+  
+- ConvoBridge uses a multi-agent AI system to generate contextually appropriate conversation questions based on selected topics. The platform focuses on the "basic preferences" dimension, helping users practice expressing likes, dislikes, favorites, and simple choices in a safe, structured environment.
++ ConvoBridge uses a **multi-agent orchestration system** where an intelligent **Orchestrator Team** coordinates specialized sub-agents to deliver personalized, adaptive conversation practice sessions. The system learns from user's speech performance and adapts questions, difficulty, and conversation dimensions to create a truly personalized learning experience.
++ 
++ ### Key Highlights
++ 
++ - **Intelligent Orchestration**: Orchestrator makes context-aware decisions based on multiple data sources
++ - **Speech Performance Feedback Loop**: System adapts in real-time based on user's speech clarity, pace, and confidence
++ - **9 Conversation Dimensions**: Varied, engaging conversations that never get repetitive
++ - **Pre-Generation System**: Instant question delivery through intelligent caching
++ - **Topic-Specific Content**: All responses and vocabulary are relevant to chosen topics
++ 
++ ---
+  
+  ## ✨ Features
++ 
++ ### Core Features
+  
+  - **Topic-Based Conversations**: Select from predefined topics (Gaming, Food, Hobbies, Weekend Plans, YouTube)
+- - **AI-Generated Questions**: Dynamic question generation using OpenAI GPT-4o
+- - **Multi-Agent Architecture**: Coordinated team of specialized AI agents
+- - **Structured Responses**: Pre-generated response options to guide users
+- - **Modern UI**: Cyberpunk-themed interface with smooth animations
+- - **Vocabulary Learning**: Integrated vocabulary feature (in development)
++ - **Intelligent Question Generation**: Orchestrator-based question generation with 9 conversation dimensions
++ - **Speech Analysis**: Real-time speech transcription, clarity scoring (0-100), pace analysis, and encouraging feedback
++ - **Text-to-Speech**: Automatic audio generation for all questions with on-demand replay
++ - **Structured Responses**: 2 topic-specific response options plus "Choose your own response"
++ - **Vocabulary Learning**: Contextually relevant vocabulary words with definitions and examples
++ - **User &amp; Session Management**: Persistent user tracking and session management via Supabase
++ - **Progressive Loading**: Optimized UX with immediate question display and background content loading
++ 
++ ### Advanced Features
++ 
++ - **Pre-Generation System**: 
++   - First questions pre-generated on login (instant topic selection)
++   - Next questions pre-generated after speech analysis (instant continue chat)
++ - **Speech Performance Feedback Loop**: 
++   - Speech metrics influence orchestrator decisions
++   - Adaptive difficulty and dimension selection
++   - Trend analysis (improving/declining/stable)
++ - **Dimension Switching Enforcement**: Automatically prevents repetition (max 2 consecutive turns on same dimension)
++ - **Parallel Execution**: Response options and vocabulary generated simultaneously
++ - **Performance Optimizations**: 
++   - Database query caching (30-second TTL)
++   - Token optimization (60-70% reduction)
++   - Parallel TTS + database operations
++ 
++ ---
+  
+  ## 🏗️ Architecture
+  
+- ConvoBridge uses a **multi-agent system** built with Agno Teams:
++ ### Multi-Agent System
++ 
++ ConvoBridge uses a **multi-agent orchestration architecture** built with Agno Teams:
+  
+- - **Orchestrator Team**: Coordinates and delegates tasks to specialized sub-agents
+- - **Conversation Agent**: Generates questions focused on basic preferences
+- - **Future Agents**: Response Agent, Vocabulary Agent (planned)
+- 
+- For detailed architecture documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md).
++ &#96;&#96;&#96;
++ ┌─────────────────────────────────────────────────────────────┐
++ │              Orchestrator Team (Coordinator)                │
++ │  - Intelligent decision-making                              │
++ │  - Coordinates all sub-agents                               │
++ │  - Adapts to user performance                               │
++ │  - Returns: {question, dimension, reasoning, difficulty}    │
++ └──────────────────┬──────────────────────────────────────────┘
++                     │
++         ┌───────────┼───────────┬──────────────┐
++         │           │           │              │
++         ▼           ▼           ▼              ▼
++ ┌─────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
++ │ Conversation│ │ Response │ │Vocabulary│ │Speech Analysis│
++ │   Agent     │ │  Agent   │ │  Agent   │ │    Agent      │
++ │             │ │          │ │          │ │               │
++ │ Generates   │ │ Generates│ │ Identifies│ │ Analyzes     │
++ │ questions   │ │ response │ │ relevant │ │ speech       │
++ │             │ │ options  │ │ vocab    │ │ performance  │
++ └─────────────┘ └──────────┘ └──────────┘ └──────────────┘
++ &#96;&#96;&#96;
++ 
++ ### Agent Responsibilities
++ 
++ 1. **Orchestrator Team**: 
++    - Topic-based reasoning
++    - Intelligent dimension selection (9 dimensions)
++    - Speech performance integration
++    - Difficulty adjustment
++    - Sub-agent coordination
++ 
++ 2. **Conversation Agent**: 
++    - Generates contextually relevant questions
++    - Follow-up questions with "Acknowledgement + Personal Preference + Question" pattern
++    - Adapts to conversation dimensions and difficulty
++ 
++ 3. **Response Agent**: 
++    - Generates 2 topic-specific response options
++    - Ensures options are relevant to chosen topic
++    - Considers user's previous responses
++ 
++ 4. **Vocabulary Agent**: 
++    - Identifies contextually relevant vocabulary words
++    - Provides definitions and examples
++    - Matches question and topic context
++ 
++ 5. **Speech Analysis Agent**: 
++    - Transcribes audio using Whisper API
++    - Analyzes clarity, pace, filler words
++    - Provides encouraging feedback
++    - Creates feedback loop with orchestrator
++ 
++ ### 9 Conversation Dimensions
++ 
++ - **Basic Preferences**: Likes, dislikes, favorites (always used for first question)
++ - **Depth/Specificity**: Deeper, more detailed questions
++ - **Social Context**: Social aspects of the topic
++ - **Emotional**: Feelings about the topic
++ - **Temporal/Frequency**: When, how often, past experiences
++ - **Comparative**: Comparing different aspects
++ - **Reflective/Why**: Reasons and motivations
++ - **Descriptive/Detail**: Detailed descriptions
++ - **Challenge/Growth**: Challenges and personal growth
++ 
++ ---
+  
+  ## 🚀 Quick Start
+  
+  ### Prerequisites
+  
+- - Node.js 18+
+- - Python 3.8+
+- - OpenAI API Key
++ - **Node.js**: v18+ (for Next.js)
++ - **Python**: 3.8+ (for backend)
++ - **OpenAI API Key**: Required for AI functionality (GPT-4o-mini, TTS, Whisper)
++ - **Supabase** (Optional but recommended): For user and session management
+  
+  ### Frontend Setup
+```
+
+**Chunk 2**
+Lines added: 5, lines removed: 1
+
+```diff
+@@ -60,8 +160,12 @@
+  &#96;&#96;&#96;
+  
+- 3. Create &#96;.env&#96; file:
++ 3. Create &#96;.env&#96; file in &#96;backend/&#96; directory:
+  &#96;&#96;&#96;env
+  OPENAI_API_KEY=your_openai_api_key_here
++ SUPABASE_URL=your_supabase_project_url
++ SUPABASE_ANON_KEY=your_supabase_anon_key
+  &#96;&#96;&#96;
++ 
++ **Note**: If Supabase credentials are not provided, the system will fall back to in-memory user ID generation, but session tracking and conversation history will not persist.
+  
+  4. Start the backend server:
+```
+
+**Chunk 3**
+Lines added: 142, lines removed: 22
+
+```diff
+@@ -71,40 +175,160 @@
+  
+  The backend will run on &#96;http://localhost:8000&#96;
++ 
++ ### Running the Full Stack
++ 
++ 1. **Terminal 1 - Backend**:
++ &#96;&#96;&#96;bash
++ cd backend
++ python main.py
++ &#96;&#96;&#96;
++ 
++ 2. **Terminal 2 - Frontend**:
++ &#96;&#96;&#96;bash
++ npm run dev
++ &#96;&#96;&#96;
++ 
++ ---
+  
+  ## 📁 Project Structure
+  
+  &#96;&#96;&#96;
+  convobridge2/
+- ├── app/                    # Next.js frontend
+- │   ├── chat/              # Chat interface
+- │   └── components/        # Shared components
+- ├── backend/               # Python backend
+- │   ├── main.py           # FastAPI application
+- │   ├── orchestrator_agent.py  # Orchestrator team
+- │   └── subagents/        # Sub-agent modules
+- └── ARCHITECTURE.md       # Detailed architecture docs
+- &#96;&#96;&#96;
++ ├── app/                          # Next.js frontend (App Router)
++ │   ├── chat/                     # Chat interface pages
++ │   │   ├── page.tsx             # Main chat page
++ │   │   └── components/          # Chat components
++ │   │       └── ChatInterface.tsx # Main chat interface
++ │   ├── login/                   # Login page
++ │   ├── components/              # Shared components
++ │   │   ├── Hero.tsx            # Home page hero
++ │   │   └── Navbar.tsx          # Navigation bar
++ │   └── globals.css              # Global styles
++ ├── backend/                      # Python backend
++ │   ├── main.py                  # FastAPI application &amp; API endpoints
++ │   ├── orchestrator_agent.py    # Orchestrator Team
++ │   ├── database.py             # Supabase database operations
++ │   ├── subagents/               # Sub-agent modules
++ │   │   ├── conversation_agent.py      # Question generation
++ │   │   ├── response_generate_agent.py # Response options
++ │   │   ├── vocabulary_agent.py        # Vocabulary words
++ │   │   └── speech_analysis_agent.py  # Speech analysis
++ │   └── tools/                   # Utility tools
++ │       ├── conversation_tools.py     # Conversation context tools
++ │       ├── text_to_speech.py         # TTS integration
++ │       └── speech_transcription_tool.py # Whisper integration
++ ├── ARCHITECTURE.md              # Comprehensive technical documentation
++ ├── AGENT_FLOW.md                # Detailed agent flow documentation
++ ├── DATAFLOW.md                  # Complete dataflow diagrams
++ ├── DEMO_AGENT_ARCHITECTURE.md  # Demo-ready agent architecture
++ ├── ORCHESTRATOR_SPEECH_INTERACTION.md # Orchestrator-Speech interaction
++ └── README.md                    # This file
++ &#96;&#96;&#96;
++ 
++ ---
+  
+  ## 🛠️ Technology Stack
+  
+- **Frontend:**
+- - Next.js 16.1.6 (App Router)
+- - TypeScript 5
+- - Tailwind CSS 4
+- - React 19.2.3
+- 
+- **Backend:**
+- - FastAPI
+- - Agno 2.5.2 (AI framework)
+- - OpenAI GPT-4o
+- - Uvicorn
++ ### Frontend
++ - **Framework**: Next.js 16.1.6 (App Router)
++ - **Language**: TypeScript 5
++ - **Styling**: Tailwind CSS 4
++ - **UI Components**: React 19.2.3
++ - **Icons**: Lucide React
++ - **Build Tool**: Turbopack
++ 
++ ### Backend
++ - **Framework**: FastAPI (Python)
++ - **AI Framework**: Agno 2.5.2
++ - **LLM Provider**: OpenAI GPT-4o-mini (optimized for performance)
++ - **TTS Provider**: OpenAI TTS API (tts-1-hd model, voice: nova)
++ - **Speech Recognition**: OpenAI Whisper API
++ - **Database**: Supabase (PostgreSQL)
++ - **Server**: Uvicorn (ASGI)
++ - **Audio Processing**: ffmpeg (for format conversion)
++ 
++ ---
+  
+  ## 📚 Documentation
+  
+- - **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Comprehensive technical documentation
++ ### Core Documentation
++ 
++ - **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Comprehensive technical architecture documentation
+    - System architecture
+    - Agent system design
+    - API documentation
+-   - Development workflow
++   - Performance optimizations
++   - Recent improvements (v2.1.0)
++ 
++ - **[DEMO_AGENT_ARCHITECTURE.md](./DEMO_AGENT_ARCHITECTURE.md)**: Demo-ready agent architecture document
++   - Agent hierarchy and responsibilities
++   - Interaction flows
++   - Key features and highlights
++ 
++ - **[DATAFLOW.md](./DATAFLOW.md)**: Complete dataflow documentation
++   - Detailed flow diagrams
++   - Technical features
++   - Performance optimizations
++   - API endpoint flows
++ 
++ - **[AGENT_FLOW.md](./AGENT_FLOW.md)**: Detailed agent flow documentation
++   - Orchestrator abilities
++   - Agent interaction patterns
++   - Decision-making processes
++ 
++ - **[ORCHESTRATOR_SPEECH_INTERACTION.md](./ORCHESTRATOR_SPEECH_INTERACTION.md)**: Orchestrator-Speech Analysis interaction
++   - Feedback loop mechanism
++   - Speech performance integration
++   - Adaptation strategies
++ 
++ ---
++ 
++ ## 🎯 Key Features Explained
++ 
++ ### 1. Intelligent Orchestration
++ 
++ The Orchestrator Team makes intelligent decisions by:
++ - Analyzing user-chosen topics
++ - Selecting appropriate conversation dimensions (9 available)
++ - Considering speech performance metrics
++ - Enforcing dimension variety (max 2 consecutive turns on same dimension)
++ - Adjusting difficulty based on user performance
++ 
++ ### 2. Speech Performance Feedback Loop
++ 
++ **How it works**:
++ 1. User records audio response
++ 2. Speech Analysis Agent analyzes clarity, pace, filler words
++ 3. Metrics saved to database
++ 4. Orchestrator retrieves metrics when generating next question
++ 5. Next question adapts based on performance:
++    - **Improving clarity** → Increase challenge
++    - **Declining clarity** → Simplify, provide support
++    - **High clarity (&gt;0.85)** → User excelling, can increase challenge
++    - **Low clarity (&lt;0.65)** → User struggling, provide more support
++ 
++ ### 3. Pre-Generation System
++ 
++ **First Questions**:
++ - Pre-generated for all topics on user login
++ - Cached for 30 minutes
++ - Instant topic selection (&lt;100ms response time)
++ 
++ **Next Questions**:
++ - Pre-generated after speech analysis completes
++ - Cached for 5 minutes
++ - Instant "Continue Chat" response (&lt;100ms response time)
++ 
++ ### 4. Performance Optimizations
++ 
++ - **Parallel Database Queries**: Conversation history, dimensions, and speech metrics fetched concurrently
++ - **Database Query Caching**: 30-second TTL cache reduces redundant queries
++ - **Token Optimization**: 60-70% reduction in LLM token usage through:
++   - Ultra-compressed speech context
++   - Rule-based history summarization
++   - Structured JSON with shortened field names
++ - **Parallel Execution**: TTS generation and database saves run in parallel
++ 
++ ---
+  
+  ## 🧪 Testing Agents
+```
+
+**Chunk 4**
+Lines added: 121, lines removed: 8
+
+```diff
+@@ -121,23 +345,136 @@
+  python subagents/conversation_agent.py
+  &#96;&#96;&#96;
++ 
++ ### Test Response Agent
++ &#96;&#96;&#96;bash
++ cd backend
++ python subagents/response_generate_agent.py
++ &#96;&#96;&#96;
++ 
++ ### Test Vocabulary Agent
++ &#96;&#96;&#96;bash
++ cd backend
++ python subagents/vocabulary_agent.py
++ &#96;&#96;&#96;
++ 
++ ### Test Speech Analysis Agent
++ &#96;&#96;&#96;bash
++ cd backend
++ python subagents/speech_analysis_agent.py
++ &#96;&#96;&#96;
++ 
++ ---
++ 
++ ## 📊 API Endpoints
++ 
++ ### Core Endpoints
++ 
++ - &#96;POST /api/login&#96; - User login and session creation
++ - &#96;POST /api/logout&#96; - User logout and session termination
++ - &#96;POST /api/start_conversation&#96; - Generate first question for a topic
++ - &#96;POST /api/continue_conversation&#96; - Generate follow-up question
++ - &#96;POST /api/get_conversation_details&#96; - Generate response options and vocabulary
++ - &#96;POST /api/process-audio&#96; - Speech analysis and transcription
++ - &#96;POST /api/text_to_speech&#96; - On-demand TTS audio generation
++ - &#96;POST /api/check_pre_generation_status&#96; - Check if pre-generated question is ready
++ 
++ For detailed API documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md#api-documentation).
++ 
++ ---
++ 
++ ## 🎨 UI Features
++ 
++ - **Cyberpunk Theme**: Modern, engaging interface with copper/cyan accents
++ - **Real-time Updates**: Instant question display with progressive loading
++ - **Speech Analysis Display**: Visual clarity scores, pace, filler words, and feedback
++ - **Vocabulary Bonus Challenge**: Expandable section for vocabulary practice (+20 brownie points)
++ - **Brownie Points System**: Gamification with coin icons
++ - **Responsive Design**: Mobile-first approach with Tailwind CSS
++ 
++ ---
++ 
++ ## 🔄 Recent Updates (v2.1.0)
++ 
++ ### Orchestrator Integration
++ - ✅ Full orchestrator control for all question generation
++ - ✅ Topic-based reasoning and intelligent dimension selection
++ - ✅ Structured JSON response with reasoning visibility
++ - ✅ Speech performance integration
++ 
++ ### Performance Optimizations
++ - ✅ Pre-generation system (first questions + next questions)
++ - ✅ Parallel database queries and caching
++ - ✅ Token optimization (60-70% reduction)
++ - ✅ Parallel TTS + database operations
++ 
++ ### Speech Feedback Loop
++ - ✅ Speech metrics influence orchestrator decisions
++ - ✅ Trend analysis (improving/declining/stable)
++ - ✅ Adaptive difficulty and dimension selection
++ 
++ ### Dimension Switching
++ - ✅ Automatic enforcement (max 2 consecutive turns)
++ - ✅ Active dimension rotation
++ - ✅ Variety maintenance
++ 
++ ### Topic-Aware Generation
++ - ✅ Response options are topic-specific
++ - ✅ Aggressive topic enforcement
++ - ✅ No generic content
++ 
++ ---
+  
+  ## 🔮 Future Enhancements
+  
+- - Response Agent for dynamic response generation
+- - Vocabulary Agent for word learning
+- - User authentication and progress tracking
+- - Additional conversation dimensions
+- - Difficulty adjustment system
++ ### Planned Features
++ 
++ 1. **Enhanced Contextual Awareness**
++    - Deeper conversation history analysis
++    - User preference learning
++    - Adaptive dimension selection based on engagement patterns
++ 
++ 2. **Advanced Speech Features**
++    - Real-time speech feedback
++    - Pronunciation practice
++    - Accent and dialect adaptation
++ 
++ 3. **Progress Tracking**
++    - Conversation skill progression
++    - Vocabulary mastery tracking
++    - Personalized difficulty adjustment
++ 
++ 4. **Social Features**
++    - Conversation sharing
++    - Progress comparison (anonymized)
++    - Achievement system
++ 
++ ---
++ 
++ ## 🤝 Contributing
++ 
++ When adding new features:
++ 
++ 1. Follow the existing agent structure in &#96;backend/subagents/&#96;
++ 2. Update &#96;orchestrator_agent.py&#96; to include new agents if needed
++ 3. Update API endpoints in &#96;backend/main.py&#96; if needed
++ 4. Update documentation (ARCHITECTURE.md, AGENT_FLOW.md, etc.)
++ 5. Test thoroughly before committing
++ 
++ ---
+  
+  ## 📝 License
+  
+  [Add license information here]
+  
+- ## 🤝 Contributing
++ ---
++ 
++ ## 🙏 Acknowledgments
+  
+- See [ARCHITECTURE.md](./ARCHITECTURE.md) for development guidelines and architecture details.
++ Built with ❤️ for helping autistic youth build conversation confidence through AI-powered practice sessions.
+  
+  ---
+  
+- **Built with ❤️ for helping autistic youth build conversation confidence**
++ **For detailed technical documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md)**  
++ **For demo presentation, see [DEMO_AGENT_ARCHITECTURE.md](./DEMO_AGENT_ARCHITECTURE.md)**  
++ **For complete dataflow, see [DATAFLOW.md](./DATAFLOW.md)**
+  
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="generic" data-tool-name="read_lints">
+<details>
+          <summary>Tool use: **read_lints** • Read lints for 1 file</summary>
+      
+Lint paths:
+
+- `README.md`
+
+Lint results
+
+
+**No lint errors found**
+</details>
+</tool-use>
+
+---
+
+
+
+---
+
+
+Updated README.md with the latest architecture details and completed features. Summary of updates:
+
+## Major Updates:
+
+### 1. **Version & Status**
+- Updated to version 2.1.0
+- Added last updated date (2026-02-17)
+
+### 2. **Complete Feature List**
+- All implemented features (not just planned)
+- Speech analysis, pre-generation, feedback loop
+- 9 conversation dimensions
+- Performance optimizations
+
+### 3. **Full Agent Architecture**
+- All 5 agents documented (Orchestrator, Conversation, Response, Vocabulary, Speech Analysis)
+- Visual hierarchy diagram
+- Responsibilities for each agent
+- 9 conversation dimensions listed
+
+### 4. **Architecture Details**
+- Multi-agent orchestration system
+- Speech performance feedback loop
+- Pre-generation system (first questions + next questions)
+- Performance optimizations
+
+### 5. **Technology Stack**
+- Updated with all current technologies
+- OpenAI GPT-4o-mini (not GPT-4o)
+- Supabase integration
+- TTS and Whisper APIs
+
+### 6. **Recent Updates Section**
+- v2.1.0 improvements documented
+- Orchestrator integration
+- Performance optimizations
+- Speech feedback loop
+- Dimension switching
+
+### 7. **Documentation Links**
+- Links to all documentation files:
+  - ARCHITECTURE.md
+  - DEMO_AGENT_ARCHITECTURE.md
+  - DATAFLOW.md
+  - AGENT_FLOW.md
+  - ORCHESTRATOR_SPEECH_INTERACTION.md
+
+### 8. **Project Structure**
+- Updated with current file structure
+- All sub-agents listed
+- Tools directory included
+
+### 9. **API Endpoints**
+- Complete list of all endpoints
+- Reference to detailed documentation
+
+The README now reflects the current state of the project and serves as a clear entry point for developers and stakeholders.
+
+---
+
