@@ -1459,9 +1459,9 @@ export function ChatInterface() {
             )}
             {TOPICS.map((topic) => {
               // Check if conversation is in progress (currentTopic is set and question exists)
-              const isConversationInProgress = currentTopic && question;
+              const isConversationInProgress: boolean = !!(currentTopic && question);
               // Disable ALL topics when conversation is in progress (including the current one)
-              const isDisabled = !sessionId || isConversationInProgress;
+              const isDisabled: boolean = !sessionId || isConversationInProgress;
               const isCurrentTopic = currentTopic === topic.id;
               
               return (
