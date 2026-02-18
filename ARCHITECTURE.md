@@ -12,6 +12,8 @@
 9. [Development Workflow](#development-workflow)
 10. [Future Enhancements](#future-enhancements)
 
+> **📚 Related Documentation**: For complete dataflow diagrams and detailed technical features, see [DATAFLOW.md](./DATAFLOW.md). For detailed agent flow documentation, see [AGENT_FLOW.md](./AGENT_FLOW.md).
+
 ---
 
 ## Project Overview
@@ -326,20 +328,27 @@ User Selects Topic
     ▼
 API Endpoint (/api/start_conversation)
     │
-    ├─ Checks database for first question on topic
-    ├─ Determines: "Basic Preferences" dimension
+    ├─ Check first_question_cache (pre-generated on login)
+    ├─ If cache hit: Use cached question + audio (instant)
+    ├─ If cache miss: Call Orchestrator
     │
     ▼
-Conversation Agent (Direct Call)
+Orchestrator Team
     │
-    ├─ Generates initial question
-    ├─ Uses "Basic Preferences" dimension
+    ├─ THINK: Analyze topic characteristics
+    ├─ ANALYZE: Review context (if returning user)
+    ├─ DECIDE: Select "Basic Preferences" dimension
+    ├─ DELEGATE: Call Conversation Agent
+    │  ├─ Conversation Agent generates question
+    │  └─ Returns question text
+    ├─ RETURN: JSON {question, dimension, reasoning, difficulty_level}
     │
     ▼
-Returns to API
+API Endpoint
     │
-    ├─ Generates text-to-speech audio
-    ├─ Returns question + audio
+    ├─ Generate TTS audio (OpenAI TTS API)
+    ├─ Save to database (conversation_turn)
+    ├─ Return question + audio + turn_id + reasoning
     │
     ▼
 Frontend displays question + auto-plays audio
@@ -350,30 +359,46 @@ Background: Parallel loading of responses & vocabulary
 
 #### Follow-Up Question Flow (Contextual Awareness)
 ```
-User Responds
+User Responds + Clicks "Continue Chat"
     │
     ▼
 API Endpoint (/api/continue_conversation)
     │
-    ├─ Orchestrator chooses dimension (contextual awareness)
+    ├─ Check question_cache (pre-generated after speech analysis)
+    ├─ If cache hit: Return cached question + audio (instant)
+    ├─ If cache miss: Generate on-demand
     │
     ▼
-Conversation Agent
+Parallel Operations
     │
-    ├─ Uses get_context tool (contextual awareness)
-    │  ├─ Gathers: user response, dimension, topic, previous question
-    │
-    ├─ Uses generate_followup_question tool
-    │  ├─ Generates contextually relevant follow-up
-    │  ├─ Format: "Acknowledgement + Personal Preference + Question"
-    │  ├─ Ensures contextual relevance to user's specific response
+    ├─ Update previous turn (background)
+    └─ Fetch context data (parallel + cached)
+       ├─ Conversation history
+       ├─ Dimension history
+       └─ Speech metrics & trends
     │
     ▼
-Returns to API
+Orchestrator Team
     │
-    ├─ Formats question with line breaks
-    ├─ Generates text-to-speech audio
-    ├─ Returns question + audio
+    ├─ THINK: Analyze user response & engagement
+    ├─ ANALYZE: Review dimension history & speech trends
+    ├─ DECIDE: Select next dimension (enforce switching if needed)
+    ├─ DECIDE: Adjust difficulty based on speech performance
+    ├─ DELEGATE: Call Conversation Agent
+    │  ├─ Conversation Agent generates follow-up
+    │  ├─ Pattern: "Acknowledgement + Personal Preference + Question"
+    │  └─ Returns question text
+    ├─ RETURN: JSON {question, dimension, reasoning, difficulty_level}
+    │
+    ▼
+API Endpoint
+    │
+    ├─ Format question (add line breaks)
+    ├─ Parallel: Generate TTS audio + Save to database
+    │  ├─ TTS: OpenAI TTS API
+    │  └─ DB: Create conversation_turn
+    ├─ Wait for both to complete
+    ├─ Return question + audio + turn_id + reasoning
     │
     ▼
 Frontend displays follow-up question + auto-plays audio
@@ -555,6 +580,7 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
 {
   "topic": "gaming",
   "user_id": "uuid-here",
+  "session_id": "session-uuid",
   "previous_question": "What kind of video games do you enjoy playing?",
   "user_response": "I like playing Super Mario",
   "difficulty_level": 1,
@@ -565,6 +591,7 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
 **Request Schema**:
 - `topic` (string, required): The conversation topic
 - `user_id` (string, required): Unique identifier for the user
+- `session_id` (string, required): Session identifier
 - `previous_question` (string, required): The previous question that was asked
 - `user_response` (string, required): The user's response to the previous question
 - `difficulty_level` (integer, optional, default: 1): Conversation difficulty level
@@ -584,7 +611,7 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
 **Response Schema**:
 - `question` (string): Follow-up question with "Acknowledgement + Personal Preference + Question" format
 - `dimension` (string): Conversation dimension chosen by orchestrator (based on **contextual awareness**)
-- `audio_base64` (string, optional): Base64-encoded audio for text-to-speech (may be null if TTS still generating)
+- `audio_base64` (string): Base64-encoded audio for text-to-speech (generated together with question)
 - `turn_id` (string): Conversation turn ID for linking response options and vocabulary
 - `reasoning` (string, optional): Orchestrator's reasoning for dimension selection
 
@@ -595,8 +622,8 @@ Generate a **contextually relevant** follow-up question with **contextual awaren
 - **Pre-Generation Support**: Checks cache for pre-generated questions (instant response after speech analysis)
 - **Optimized Performance**:
   - Parallelizes orchestrator call + previous turn update
-  - Returns question before TTS completion (TTS continues in background)
-  - Reduced prompt size for faster LLM response
+  - TTS audio generation and database save run in parallel (both complete before returning)
+  - Reduced prompt size for faster LLM response (ultra-compressed context, rule-based summarization)
 - Orchestrator analyzes user engagement, dimension history, and speech performance
 - Ensures **contextual relevance** by referencing specific things mentioned by user
 - Varies acknowledgements to maintain natural conversation
@@ -675,7 +702,32 @@ Generate speech from text using OpenAI's TTS API (on-demand audio generation).
 **Features**:
 - Direct OpenAI TTS API integration
 - Configurable voice, model, and format
-- Used for on-demand audio replay
+- Used for on-demand audio replay and vocabulary audio pre-generation
+
+#### POST `/api/check_pre_generation_status`
+Check if a pre-generated follow-up question is ready in cache.
+
+**Request Body**:
+```json
+{
+  "user_id": "uuid-here",
+  "topic": "gaming",
+  "previous_turn_id": "turn-uuid"
+}
+```
+
+**Response**:
+```json
+{
+  "ready": true,
+  "message": "Pre-generated question is ready"
+}
+```
+
+**Features**:
+- Checks in-memory cache for pre-generated questions
+- Used by frontend to enable "Continue Chat" button
+- Returns status immediately (non-blocking)
 
 #### POST `/api/process-audio`
 Process uploaded audio file for speech analysis with **contextual awareness**.
@@ -1001,12 +1053,14 @@ The system implements intelligent pre-generation to minimize user wait times:
 - **Race Condition Handling**: If user selects topic before pre-generation completes, system waits up to 10 seconds
 
 ### Next Question Pre-Generation
-- **After Speech Analysis**: Automatically pre-generates next follow-up question
+- **After Speech Analysis**: Automatically pre-generates next follow-up question (including TTS audio)
 - **Background Processing**: Runs asynchronously after speech analysis completes
 - **Caching**: Questions cached with 5-minute TTL, keyed by user_id + topic + previous_turn_id
-- **Instant Continue Chat**: When user clicks "Continue Chat", question served from cache
+- **Cache Contents**: Includes question, dimension, audio_base64, reasoning, difficulty_level
+- **Instant Continue Chat**: When user clicks "Continue Chat", question + audio served from cache
 - **Status Polling**: Frontend polls `/api/check_pre_generation_status` to enable button when ready
 - **Hybrid Approach**: Button enables after 4 seconds OR when ready (whichever comes first)
+- **Complete Pre-Generation**: Both question and TTS audio are pre-generated and cached together
 
 ### Cache Management
 - **In-Memory Cache**: Thread-safe dictionary with expiration tracking
@@ -1030,8 +1084,9 @@ The system implements intelligent pre-generation to minimize user wait times:
 
 ### Response Time Optimization
 - **Parallel Orchestrator + Database Update**: Previous turn update runs in parallel with orchestrator call
-- **Return Before TTS**: Question returned immediately, TTS continues in background (1-second wait max)
-- **Simplified First Questions**: Returning users skip history retrieval for first questions
+- **Parallel TTS + Database Save**: TTS audio generation and database save run in parallel for follow-up questions (both complete before returning)
+- **Simplified First Questions**: Returning users skip history retrieval for first questions (faster first question response)
+- **Complete Audio Generation**: Follow-up questions include TTS audio (generated together with question, not returned before completion)
 
 ### Rate Limit Handling
 - **Automatic Retry**: 3 retry attempts with exponential backoff (2s → 4s → 8s)
@@ -1081,10 +1136,11 @@ The system implements intelligent pre-generation to minimize user wait times:
 ## Recent Architectural Improvements (v2.1.0)
 
 ### Orchestrator Integration
-- **Full Orchestrator Control**: All question generation now goes through orchestrator for intelligent decision-making
+- **Full Orchestrator Control**: All question generation (first questions and follow-ups) now goes through orchestrator for intelligent decision-making
 - **Topic-Based Reasoning**: Orchestrator analyzes user-chosen topics and selects appropriate dimensions
 - **Structured JSON Response**: Orchestrator returns `{"question", "dimension", "reasoning", "difficulty_level"}` for transparency
 - **Reasoning Visibility**: Orchestrator's reasoning included in API responses for debugging and transparency
+- **Complete Question Flow**: Orchestrator → Conversation Agent → Question + TTS Audio (generated together)
 
 ### Dimension Switching Enforcement
 - **Max 2 Consecutive Turns**: System enforces maximum 2 consecutive turns on same dimension
@@ -1105,17 +1161,19 @@ The system implements intelligent pre-generation to minimize user wait times:
 - **User Context Integration**: Combines topic awareness with user's previous response for personalized options
 
 ### Performance Optimizations
-- **Parallel Database Queries**: Conversation history, dimensions, and speech metrics fetched concurrently
-- **Database Query Caching**: 30-second cache for database query results
-- **LLM Token Reduction**: 
-  - Compressed speech context format
-  - Rule-based history summarization
-  - Structured JSON with shortened field names
-  - Truncated context fields
+- **Parallel Database Queries**: Conversation history, dimensions, and speech metrics fetched concurrently using `asyncio.gather`
+- **Database Query Caching**: 30-second cache for database query results (reduces redundant queries)
+- **LLM Token Reduction** (60-70% reduction in token usage):
+  - Ultra-compressed speech context format (e.g., `sp:tr=i,cl=0.88`)
+  - Rule-based history summarization (max 2-3 turns)
+  - Structured JSON with shortened field names (e.g., "t" for topic, "pq" for previous question)
+  - Truncated context fields (prev_q: 60 chars, user_resp: 80 chars, history: 100 chars)
+  - Only 2 recent dimensions passed (truncated to 15 chars each)
 - **Response Time Improvements**:
-  - Parallel orchestrator + database update
-  - Return question before TTS completion
-  - Simplified first questions (skip history for returning users)
+  - Parallel orchestrator + database update (previous turn update runs in background)
+  - Parallel TTS + database save for follow-up questions (both complete before returning)
+  - Simplified first questions (skip history retrieval for returning users)
+  - Complete audio generation (follow-up questions include TTS audio, generated together)
 
 ### Rate Limit Resilience
 - **Automatic Retry**: 3 retry attempts with exponential backoff (2s → 4s → 8s)
@@ -1258,6 +1316,12 @@ When adding new features:
 
 **Last Updated**: 2026-02-17
 **Version**: 2.1.0
+
+## Related Documentation
+
+For complete dataflow documentation with detailed technical features, see:
+- **[DATAFLOW.md](./DATAFLOW.md)**: Complete dataflow diagrams, technical features, and performance optimizations
+- **[AGENT_FLOW.md](./AGENT_FLOW.md)**: Detailed agent flow documentation and orchestrator abilities
 
 ## Key Architectural Concepts
 
