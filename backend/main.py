@@ -1892,6 +1892,17 @@ async def continue_conversation(request: ContinueConversationRequest):
         if not request.user_response:
             raise HTTPException(status_code=400, detail="user_response is required for follow-up questions")
         
+        # Log incoming user response for context drift / relevancy testing
+        print(f"[SESSION TURN] ===== USER RESPONSE RECEIVED =====")
+        print(f"[SESSION TURN] User ID:           {request.user_id}")
+        print(f"[SESSION TURN] Session ID:        {request.session_id}")
+        print(f"[SESSION TURN] Topic:             {request.topic}")
+        print(f"[SESSION TURN] Previous Turn ID:  {request.previous_turn_id}")
+        print(f"[SESSION TURN] Previous Question: {(request.previous_question or 'N/A')[:200]}")
+        print(f"[SESSION TURN] User Response:     {request.user_response}")
+        print(f"[SESSION TURN] Word Count:        {len(request.user_response.split())}")
+        print(f"[SESSION TURN] ============================================")
+
         # Check cache for pre-generated question first
         print(f"[CONTINUE] Checking cache for user_id={request.user_id}, topic={request.topic}, previous_turn_id={request.previous_turn_id}")
         if request.previous_turn_id:
@@ -1903,6 +1914,21 @@ async def continue_conversation(request: ContinueConversationRequest):
             if cached_question:
                 print(f"[CACHE HIT] Returning pre-generated question for user {request.user_id}, topic {request.topic}")
                 
+                # Update previous turn with user's response (same as non-cache path)
+                if request.previous_turn_id and request.user_response:
+                    try:
+                        updated_turn = update_conversation_turn_with_response(
+                            turn_id=request.previous_turn_id,
+                            user_response=request.user_response,
+                            response_type="custom_speech"
+                        )
+                        if updated_turn:
+                            print(f"[CACHE HIT] Updated previous turn {request.previous_turn_id} with user response")
+                        else:
+                            print(f"[CACHE HIT] Warning: Failed to update previous turn {request.previous_turn_id}")
+                    except Exception as e:
+                        print(f"[CACHE HIT] Warning: Error updating previous turn: {e}")
+
                 # Need to create turn in database and get turn_id
                 turn_id = None
                 try:
@@ -2166,7 +2192,7 @@ Return JSON: {{"question":"...","dimension":"...","reasoning":"...","difficulty_
             # Log detailed orchestrator decisions
             print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")
             print(f"[ORCHESTRATOR] Topic: {request.topic}")
-            print(f"[ORCHESTRATOR] User Response: {request.user_response[:100]}...")
+            print(f"[ORCHESTRATOR] User Response: {request.user_response}")
             print(f"[ORCHESTRATOR] Engagement Level: {engagement_level} ({response_length} words)")
             print(f"[ORCHESTRATOR] Dimension History: {dimension_history[:5] if dimension_history else 'None'}")
             if speech_trends:
@@ -2737,7 +2763,17 @@ async def process_audio(
                 print(f"Warning: No turn_id provided, skipping speech analysis database save")
             
             print(f"Audio processed successfully, file size: {file_size} bytes")
-            
+
+            # Log the transcribed user response for context drift / relevancy testing
+            print(f"[SESSION TURN] ===== SPEECH RESPONSE TRANSCRIBED =====")
+            print(f"[SESSION TURN] Turn ID:       {turn_id or 'N/A'}")
+            print(f"[SESSION TURN] Transcript:    {analysis_data['transcript']}")
+            print(f"[SESSION TURN] Clarity Score: {analysis_data['clarity_score']}")
+            print(f"[SESSION TURN] Pace (WPM):    {analysis_data['pace_wpm']}")
+            print(f"[SESSION TURN] Filler Words:  {analysis_data['filler_words']}")
+            print(f"[SESSION TURN] Feedback:      {analysis_data['feedback']}")
+            print(f"[SESSION TURN] ================================================")
+
             # Trigger background pre-generation of next question if we have all required info
             print(f"[PRE-GEN] Checking if pre-generation should be triggered...")
             print(f"[PRE-GEN] turn_id: {turn_id}, transcript: {analysis_data.get('transcript', '')[:50] if analysis_data.get('transcript') else 'None'}...")

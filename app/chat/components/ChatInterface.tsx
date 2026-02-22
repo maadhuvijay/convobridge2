@@ -604,7 +604,7 @@ export function ChatInterface() {
           user_id: userId,
           session_id: effectiveSessionId, // Pass session_id
           previous_question: previousQuestion,
-          previous_turn_id: previousTurnId, // Pass previous turn_id to update with user response
+          previous_turn_id: currentTurnId, // Pass current turn_id to update with user response
           user_response: userResponse,
           difficulty_level: 1
         })

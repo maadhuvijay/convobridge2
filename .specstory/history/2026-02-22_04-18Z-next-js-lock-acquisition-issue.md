@@ -444,6 +444,144 @@ Now I have a clear picture. Let me check if the backend is running and test the 
 
 ---
 
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+_**User (2026-02-22 04:27Z)**_
+
+In the logging sessions, log the user responses as well to test context drifting and relevancy
+
+---
+
+_**Agent (model default, mode Agent)**_
+
+Let me explore the logging system to understand the current structure.
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="codebase_search">
+<details>
+                <summary>Tool use: **codebase_search** • Searched codebase "Where are logging sessions stored and what gets logged per session?" • **7** results</summary>
+            
+| File | Lines |
+|------|-------|
+| `backend/main.py` | L25 |
+| `backend/main.py` | L27-76 |
+| `backend/main.py` | L43-76 |
+| `backend/requirements.txt` | L6 |
+| `backend/.gitignore` | L4 |
+| `backend/main.py` | L25-31 |
+| `backend/main.py` | L18-27 |
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "log|session_log|conversation_log|supabase.*insert|\.insert\(" in "C:\dev\convobridge2\backend\main.py" • 63 matches</summary>
+
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\database.py` | `response = supabase.table('users').insert(\{` | L121 |
+| `.\database.py` | `response = supabase.table('sessions').insert(\{` | L154 |
+| `.\database.py` | `response = supabase.table('session_topics').insert(\{` | L199 |
+| `.\database.py` | `This is called when a user logs out.` | L264 |
+| `.\database.py` | `response = supabase.table('conversation_turns').insert(\{` | L838 |
+| `.\database.py` | `response = supabase.table('response_options').insert(options_data).execute()` | L990 |
+| `.\database.py` | `response = supabase.table('vocabulary_words').insert(\{` | L1053 |
+| `.\orchestrator_agent.py` | `"     - Natural conversation flow (what would logically come next)",` | L103 |
+| `.\main.py` | `for turn in reversed(recent_turns):  # Process in chronological order` | L213 |
+| `.\main.py` | `session_id: str  # Required: session_id from login` | L571 |
+| `.\main.py` | `session_id: str  # Required: session_id from login` | L596 |
+| `.\main.py` | `class LoginRequest(BaseModel):` | L614 |
+| `.\main.py` | `class LoginResponse(BaseModel):` | L617 |
+| `.\main.py` | `login_timestamp: str` | L620 |
+| `.\main.py` | `class LogoutRequest(BaseModel):` | L659 |
+| `.\main.py` | `class LogoutResponse(BaseModel):` | L663 |
+| `.\main.py` | `@app.post("/api/login", response_model=LoginResponse)` | L693 |
+| `.\main.py` | `async def login(request: LoginRequest):` | L694 |
+| `.\main.py` | `Log user login with username and timestamp.` | L696 |
+| `.\main.py` | `login_timestamp = datetime.now().isoformat()` | L717 |
+| `.\main.py` | `"login_timestamp": login_timestamp,` | L722 |
+| `.\main.py` | `"message": "Login successful (database not configured - using fallback)"` | L724 |
+| `.\main.py` | `login_timestamp = datetime.now().isoformat()` | L728 |
+| `.\main.py` | `# Create a new session for this login` | L743 |
+| `.\main.py` | `print(f"User logged in: \{username\} (ID: \{user_id\}) at \{login_timestamp\}")` | L747 |
+| `.\main.py` | `print(f"[LOGIN] Cleaned up \{len(stale_keys)\} stale pre-generation tasks")` | L758 |
+| `.\main.py` | `print(f"[LOGIN] Triggered background pre-generation of first questions for all topics")` | L764 |
+| `.\main.py` | `print(f"[LOGIN] Warning: Failed to trigger pre-generation: \{e\}")` | L766 |
+| `.\main.py` | `# Don't fail login if pre-generation fails` | L767 |
+| `.\main.py` | `"login_timestamp": login_timestamp,` | L772 |
+| `.\main.py` | `"message": "Login successful",` | L774 |
+| `.\main.py` | `print(f"Error during login: \{e\}")` | L781 |
+| `.\main.py` | `raise HTTPException(status_code=500, detail=f"Error during login: \{str(e)\}")` | L784 |
+| `.\main.py` | `@app.post("/api/logout", response_model=LogoutResponse)` | L786 |
+| `.\main.py` | `async def logout(request: LogoutRequest):` | L787 |
+| `.\main.py` | `Log user logout with timestamp.` | L789 |
+| `.\main.py` | `print(f"User logged out: \{user_id\} (Session: \{session_id\}) at \{ended_at\}")` | L828 |
+| `.\main.py` | `"message": "Logout successful. Session data saved.",` | L832 |
+| `.\main.py` | `print(f"Error during logout: \{e\}")` | L839 |
+| `.\main.py` | `raise HTTPException(status_code=500, detail=f"Error during logout: \{str(e)\}")` | L842 |
+| `.\main.py` | `# Validate dimension (log warning if not in list, but allow flexibility)` | L1270 |
+| `.\main.py` | `# Log detailed orchestrator decisions` | L1276 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== DECISION LOG =====")` | L1277 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L1288 |
+| `.\main.py` | `This is used to pre-generate questions for all topics on login.` | L1403 |
+| `.\main.py` | `# Call orchestrator with rate limit retry logic` | L1456 |
+| `.\main.py` | `Called after user login to prepare questions for instant topic selection.` | L1583 |
+| `.\main.py` | `# Call orchestrator with rate limit retry logic` | L1721 |
+| `.\main.py` | `# Validate dimension (log warning if not in list, but allow flexibility)` | L2160 |
+| `.\main.py` | `# Log detailed orchestrator decisions` | L2166 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")` | L2167 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L2188 |
+| `.\main.py` | `raise HTTPException(status_code=500, detail="Failed to generate audio: TTS function returned None. Check backend logs for details.")` | L2526 |
+| `.\main.py` | `detail="Failed to convert audio file using ffmpeg. Check server logs for details."` | L2658 |
+| `.\database_schema.sql` | `-- Tracks each login session (from login to logout)` | L26 |
+| `.\DATABASE_SCHEMA.md` | `- `name` (TEXT): User's name (from login)` | L14 |
+| `.\DATABASE_SCHEMA.md` | `**Usage:** Created when a user first logs in.` | L18 |
+| `.\DATABASE_SCHEMA.md` | `Tracks each login session (from login to logout).` | L23 |
+| `.\DATABASE_SCHEMA.md` | `- `started_at` (TIMESTAMP): When the session started (login)` | L28 |
+| `.\DATABASE_SCHEMA.md` | `- `ended_at` (TIMESTAMP, Nullable): When the session ended (logout)` | L29 |
+| `.\DATABASE_SCHEMA.md` | `- Create a new session when user logs in` | L35 |
+| `.\DATABASE_SCHEMA.md` | `- Update `ended_at` and set `status = 'completed'` when user logs out` | L36 |
+| `.\subagents\speech_analysis_agent.py` | `sys.path.insert(0, str(backend_dir))` | L98 |
+
+
+</details>
+</tool-use>
+
+---
+
 <tool-use data-tool-type="generic" data-tool-name="list_dir">
 <details>
             <summary>Tool use: **list_dir** • Listed directory, 0 results</summary>
@@ -454,27 +592,709 @@ No results found
 
 ---
 
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "conversation_turns|save_conversation|log_turn|user_response|transcript" in "C:\dev\convobridge2\backend\database.py" • 117 matches</summary>
 
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\database.py` | `turns_response = supabase.table('conversation_turns')\` | L358 |
+| `.\database.py` | `turns_response = supabase.table('conversation_turns')\` | L411 |
+| `.\database.py` | `response = supabase.table('conversation_turns')\` | L447 |
+| `.\database.py` | `Each turn includes question, user_response, dimension, and turn_number.` | L474 |
+| `.\database.py` | `turns_response = supabase.table('conversation_turns')\` | L514 |
+| `.\database.py` | `.select('id, turn_number, question, user_response, dimension, question_asked_at')\` | L515 |
+| `.\database.py` | `print(f"  Turn \{turn.get('turn_number')\}: Q='\{turn.get('question', '')[:50]\}...' A='\{turn.get('user_response', '')[:50] if turn.get('user_response') else 'None'\}...'")` | L523 |
+| `.\database.py` | `turns_response = supabase.table('conversation_turns')\` | L588 |
+| `.\database.py` | `turns_response = supabase.table('conversation_turns')\` | L742 |
+| `.\database.py` | `response = supabase.table('conversation_turns').insert(\{` | L838 |
+| `.\database.py` | `user_response: str,` | L858 |
+| `.\database.py` | `user_response: The user's response text` | L867 |
+| `.\database.py` | `'user_response': user_response,` | L879 |
+| `.\database.py` | `response = supabase.table('conversation_turns')\` | L887 |
+| `.\database.py` | `transcript: str,` | L903 |
+| `.\database.py` | `transcript: Transcribed speech text` | L917 |
+| `.\database.py` | `'transcript': transcript,` | L934 |
+| `.\database.py` | `response = supabase.table('conversation_turns')\` | L946 |
+| `.\orchestrator_agent.py` | `"It transcribes speech, analyzes the transcript for clarity and coherence,",` | L163 |
+| `.\fix_rls_policies.sql` | `-- ALTER TABLE conversation_turns DISABLE ROW LEVEL SECURITY;` | L14 |
+| `.\fix_rls_policies.sql` | `CREATE POLICY "Allow all operations on conversation_turns" ON conversation_turns` | L42 |
+| `.\fix_rls_policies.sql` | `-- DROP POLICY IF EXISTS "Allow all operations on conversation_turns" ON conversation_turns;` | L71 |
+| `.\tools\conversation_tools.py` | `user_response: str,` | L18 |
+| `.\tools\conversation_tools.py` | `user_response: The teen's response to the previous question` | L28 |
+| `.\tools\conversation_tools.py` | `- user_response: The teen's response` | L38 |
+| `.\tools\conversation_tools.py` | `"user_response": user_response,` | L45 |
+| `.\tools\conversation_tools.py` | `f"User Response: \{user_response\}\n"` | L51 |
+| `.\tools\conversation_tools.py` | `user_response: str,` | L62 |
+| `.\tools\conversation_tools.py` | `user_response: The teen's response to the previous question` | L72 |
+| `.\tools\conversation_tools.py` | `If user_response is "I like playing Super Mario", dimension is "social context", and topic is "gaming":` | L88 |
+| `.\tools\conversation_tools.py` | `context_parts.append(f"User's response: \{user_response\}")` | L97 |
+| `.\tools\conversation_tools.py` | `user_response: str,` | L152 |
+| `.\tools\conversation_tools.py` | `user_response=user_response,` | L162 |
+| `.\tools\conversation_tools.py` | `user_response="I like playing Super Mario",` | L175 |
+| `.\tools\conversation_tools.py` | `user_response="I like playing Super Mario",` | L186 |
+| `.\main.py` | `user_response = (turn.get('user_response') or '').strip() or (turn.get('transcript') or '').strip()` | L215 |
+| `.\main.py` | `if user_response:` | L217 |
+| `.\main.py` | `response_summary = user_response[:100].strip()` | L219 |
+| `.\main.py` | `user_response: Optional[str] = None` | L599 |
+| `.\main.py` | `user_response: Optional[str] = None  # User's previous response for context-aware options` | L608 |
+| `.\main.py` | `transcript: str` | L640 |
+| `.\main.py` | `user_response: str,` | L1615 |
+| `.\main.py` | `response_length = len(user_response.split())` | L1647 |
+| `.\main.py` | `user_resp = str(user_response or "")[:150] if user_response else ""` | L1689 |
+| `.\main.py` | `context_json_str = f'\{{"topic":"\{topic\}","prev_q":"\{str(previous_question or "")[:100]\}","user_resp":"\{str(user_response or "")[:150]\}","diff":\{difficulty_level\},"eng":"\{engagement_level\}"\}}'` | L1706 |
+| `.\main.py` | `if not request.user_response:` | L1892 |
+| `.\main.py` | `raise HTTPException(status_code=400, detail="user_response is required for follow-up questions")` | L1893 |
+| `.\main.py` | `user_response=request.user_response,` | L1953 |
+| `.\main.py` | `response_length = len(request.user_response.split())` | L1995 |
+| `.\main.py` | `user_resp = str(request.user_response or "")[:80] if request.user_response else ""` | L2023 |
+| `.\main.py` | `context_json_str = f'\{{"t":"\{request.topic[:20]\}","pq":"\{str(request.previous_question or "")[:60]\}","ur":"\{str(request.user_response or "")[:80]\}","d":\{request.difficulty_level\},"e":"\{engagement_level[0]\}"\}}'` | L2046 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] User Response: \{request.user_response[:100]\}...")` | L2169 |
+| `.\main.py` | `if request.user_response:` | L2366 |
+| `.\main.py` | `f"User said: '\{request.user_response\}'. "` | L2369 |
+| `.\main.py` | `Analyze speech transcript from the teen.` | L2548 |
+| `.\main.py` | `This endpoint accepts a transcript (text) and analyzes it.` | L2549 |
+| `.\main.py` | `required_fields = ['transcript', 'clarity_score', 'feedback', 'strengths', 'suggestions', 'pace_wpm', 'filler_words']` | L2705 |
+| `.\main.py` | `transcript=analysis_data['transcript'],` | L2718 |
+| `.\main.py` | `print(f"[PRE-GEN] turn_id: \{turn_id\}, transcript: \{analysis_data.get('transcript', '')[:50] if analysis_data.get('transcript') else 'None'\}...")` | L2743 |
+| `.\main.py` | `if turn_id and analysis_data.get('transcript'):` | L2744 |
+| `.\main.py` | `turn_response = supabase.table('conversation_turns')\` | L2749 |
+| `.\main.py` | `print(f"[PRE-GEN] User Response: \{analysis_data['transcript'][:100]\}...")` | L2792 |
+| `.\main.py` | `user_response=analysis_data['transcript'],` | L2800 |
+| `.\main.py` | `"transcript": "[Transcription failed]",` | L2836 |
+| `.\main.py` | `if "transcribe" in error_detail.lower() or "transcription" in error_detail.lower():` | L2858 |
+| `.\main.py` | `error_msg += "\n\nThis might be a transcription issue. Check:\n- OpenAI API key is valid\n- Model 'gpt-4o-audio-preview' is available\n- Audio file format is supported (wav, mp3)"` | L2859 |
+| `.\database_schema.sql` | `-- Table: conversation_turns` | L66 |
+| `.\database_schema.sql` | `CREATE TABLE IF NOT EXISTS conversation_turns (` | L71 |
+| `.\database_schema.sql` | `user_response TEXT, -- The actual response the user gave (transcript or selected option)` | L82 |
+| `.\database_schema.sql` | `transcript TEXT, -- Transcribed speech` | L87 |
+| `.\database_schema.sql` | `CREATE INDEX IF NOT EXISTS idx_conversation_turns_session_topic_id ON conversation_turns(session_topic_id);` | L106 |
+| `.\database_schema.sql` | `CREATE INDEX IF NOT EXISTS idx_conversation_turns_turn_number ON conversation_turns(session_topic_id, turn_number);` | L107 |
+| `.\database_schema.sql` | `CREATE INDEX IF NOT EXISTS idx_conversation_turns_dimension ON conversation_turns(dimension);` | L108 |
+| `.\database_schema.sql` | `CREATE INDEX IF NOT EXISTS idx_conversation_turns_difficulty_level ON conversation_turns(difficulty_level);` | L109 |
+| `.\database_schema.sql` | `conversation_turn_id UUID NOT NULL REFERENCES conversation_turns(id) ON DELETE CASCADE,` | L119 |
+| `.\database_schema.sql` | `conversation_turn_id UUID NOT NULL REFERENCES conversation_turns(id) ON DELETE CASCADE,` | L135 |
+| `.\database_schema.sql` | `total_conversation_turns INTEGER NOT NULL DEFAULT 0,` | L159 |
+| `.\database_schema.sql` | `CREATE TRIGGER update_conversation_turns_updated_at BEFORE UPDATE ON conversation_turns` | L203 |
+| `.\database_schema.sql` | `AFTER INSERT ON conversation_turns` | L224 |
+| `.\database_schema.sql` | `ALTER TABLE conversation_turns ENABLE ROW LEVEL SECURITY;` | L236 |
+| `.\database_schema.sql` | `LEFT JOIN conversation_turns ct ON st.id = ct.session_topic_id` | L282 |
+| `.\tools\__init__.py` | `from .speech_transcription_tool import transcribe_audio` | L6 |
+| `.\tools\set_sentence_difficulty.py` | `response = supabase.table('conversation_turns')\` | L87 |
+| `.\tools\set_sentence_difficulty.py` | `response = supabase.table('conversation_turns')\` | L173 |
+| `.\DATABASE_SCHEMA.md` | `### 4. `conversation_turns`` | L60 |
+| `.\DATABASE_SCHEMA.md` | `- `user_response` (TEXT, Nullable): User's response (transcript or text)` | L70 |
+| `.\DATABASE_SCHEMA.md` | `- `transcript` (TEXT, Nullable): Transcribed speech (if speech was used)` | L73 |
+| `.\DATABASE_SCHEMA.md` | `- `conversation_turn_id` (UUID, Foreign Key → `conversation_turns.id`): The turn` | L97 |
+| `.\DATABASE_SCHEMA.md` | `- `conversation_turn_id` (UUID, Foreign Key → `conversation_turns.id`): The turn` | L113 |
+| `.\DATABASE_SCHEMA.md` | `- `total_conversation_turns` (INTEGER): Total conversation turns` | L132 |
+| `.\DATABASE_SCHEMA.md` | `session_topics (1) ──→ (many) conversation_turns` | L152 |
+| `.\DATABASE_SCHEMA.md` | `conversation_turns (1) ──→ (many) response_options` | L153 |
+| `.\DATABASE_SCHEMA.md` | `conversation_turns (1) ──→ (many) vocabulary_words` | L154 |
+| `.\DATABASE_SCHEMA.md` | `FROM conversation_turns ct` | L194 |
+| `.\DATABASE_SCHEMA.md` | `JOIN conversation_turns ct ON st.id = ct.session_topic_id` | L210 |
+| `.\subagents\speech_analysis_agent.py` | `This agent transcribes teen speech responses, analyzes the transcript,` | L3 |
+| `.\subagents\speech_analysis_agent.py` | `This agent transcribes speech, analyzes the transcript,` | L21 |
+| `.\subagents\speech_analysis_agent.py` | `description="A sub-agent that transcribes speech, analyzes transcripts, provides speech clarity scores, and gives encouraging feedback to teens.",` | L27 |
+| `.\subagents\speech_analysis_agent.py` | `"  - Calculate WER by comparing the transcript to the expected response",` | L44 |
+| `.\subagents\speech_analysis_agent.py` | `"  - Estimate pace by counting words and dividing by duration (if available) or estimating from transcript length",` | L45 |
+| `.\subagents\speech_analysis_agent.py` | `'  "transcript": "what the teen actually said",',` | L50 |
+| `.\subagents\speech_analysis_agent.py` | `from tools.speech_transcription_tool import transcribe_audio` | L99 |
+| `.\subagents\speech_analysis_agent.py` | `transcript = transcribe_audio(` | L103 |
+| `.\subagents\speech_analysis_agent.py` | `if not transcript or transcript.strip() == "":` | L108 |
+| `.\subagents\speech_analysis_agent.py` | `print(f"Transcription successful: \{transcript[:100]\}...")` | L110 |
+| `.\subagents\speech_analysis_agent.py` | `f"Here is the transcript: \"\{transcript\}\"\n\n"` | L129 |
+| `.\subagents\speech_analysis_agent.py` | `f"Here is the transcript: \"\{transcript\}\"\n\n"` | L140 |
+| `.\subagents\speech_analysis_agent.py` | `print("This agent analyzes speech transcripts and provides feedback.\n")` | L164 |
+| `.\subagents\speech_analysis_agent.py` | `# Test with a sample transcript` | L166 |
+| `.\subagents\speech_analysis_agent.py` | `test_transcript = "I really like playing video games, especially action games."` | L167 |
+| `.\subagents\speech_analysis_agent.py` | `f"Here is the transcript: \"\{test_transcript\}\"\n\n"` | L179 |
+| `.\subagents\speech_analysis_agent.py` | `print(f"Transcript: \{test_transcript\}")` | L184 |
+| `.\tools\speech_transcription_tool.py` | `This tool handles audio file transcription using Agno's audio capabilities.` | L3 |
+| `.\tools\speech_transcription_tool.py` | `Transcribe audio to text using Agno's audio transcription capabilities.` | L26 |
+| `.\tools\speech_transcription_tool.py` | `# Create a transcription agent with audio capabilities` | L42 |
+| `.\tools\speech_transcription_tool.py` | `transcription_agent = Agent(` | L45 |
+| `.\tools\speech_transcription_tool.py` | `response = transcription_agent.run(prompt, audio=[audio_input])` | L60 |
+
+
+</details>
+</tool-use>
 
 ---
 
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "print.*\[.*\]|print.*turn|print.*question|print.*response|print.*topic|print.*session" in "C:\dev\convobridge2\backend\main.py" • 287 matches</summary>
 
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\database.py` | `print(f"[OK] Supabase client initialized successfully")` | L47 |
+| `.\database.py` | `print(f"[ERROR] Failed to initialize Supabase client: \{e\}")` | L49 |
+| `.\database.py` | `print(f"User '\{name\}' already exists with ID: \{existing_user['id']\}")` | L116 |
+| `.\database.py` | `print(f"Created new user: \{user['name']\} (ID: \{user['id']\})")` | L127 |
+| `.\database.py` | `print(f"Created new session: \{session['id']\} for user \{user_id\}")` | L161 |
+| `.\database.py` | `print(f"Error creating session: \{e\}")` | L165 |
+| `.\database.py` | `print(f"Error getting/creating session topic: \{e\}")` | L209 |
+| `.\database.py` | `print("Warning: Supabase not configured, defaulting to first question")` | L226 |
+| `.\database.py` | `print(f"Error checking first question: \{e\}")` | L257 |
+| `.\database.py` | `print("Warning: Supabase not configured, cannot end session")` | L273 |
+| `.\database.py` | `print(f"Session \{session_id\} ended successfully at \{session.get('ended_at')\}")` | L285 |
+| `.\database.py` | `print(f"Error ending session: \{e\}")` | L289 |
+| `.\database.py` | `print(f"Error getting active session: \{e\}")` | L319 |
+| `.\database.py` | `print(f"Error checking if returning user: \{e\}")` | L369 |
+| `.\database.py` | `print(f"Error getting last topic for user: \{e\}")` | L429 |
+| `.\database.py` | `print(f"Error getting last conversation turn: \{e\}")` | L458 |
+| `.\database.py` | `print(f"No sessions found for user \{user_id\}")` | L484 |
+| `.\database.py` | `print(f"Found \{len(session_ids)\} sessions for user \{user_id\}")` | L488 |
+| `.\database.py` | `print(f"Session \{session_id\}: Found \{len(matching_topics)\} matching topics for '\{topic_name\}'")` | L509 |
+| `.\database.py` | `print(f"Found \{len(turns_response.data)\} turns for topic \{topic_id\}")` | L521 |
+| `.\database.py` | `print(f"  Turn \{turn.get('turn_number')\}: Q='\{turn.get('question', '')[:50]\}...' A='\{turn.get('user_response', '')[:50] if turn.get('user_response') else 'None'\}...'")` | L523 |
+| `.\database.py` | `print(f"Returning \{len(result)\} conversation turns for user \{user_id\}, topic \{topic_name\}")` | L531 |
+| `.\database.py` | `print(f"Error getting conversation history for user \{user_id\}, topic \{topic_name\}: \{e\}")` | L534 |
+| `.\database.py` | `print(f"Returning \{len(result)\} speech metrics for user \{user_id\}, topic \{topic_name\}")` | L603 |
+| `.\database.py` | `print(f"Error getting speech metrics for user \{user_id\}, topic \{topic_name\}: \{e\}")` | L606 |
+| `.\database.py` | `print(f"Returning \{len(result)\} dimensions for user \{user_id\}, topic \{topic_name\}: \{result\}")` | L763 |
+| `.\database.py` | `print(f"Error getting dimension history for user \{user_id\}, topic \{topic_name\}: \{e\}")` | L766 |
+| `.\database.py` | `print(f"Error getting current session topic: \{e\}")` | L797 |
+| `.\database.py` | `print(f"Created conversation turn \{turn_number\} for session_topic \{session_topic_id\} (ID: \{turn['id']\})")` | L848 |
+| `.\database.py` | `print(f"Error creating conversation turn: \{e\}")` | L852 |
+| `.\database.py` | `print(f"Updated conversation turn \{turn_id\} with user response")` | L893 |
+| `.\database.py` | `print(f"Error updating conversation turn with response: \{e\}")` | L897 |
+| `.\database.py` | `print(f"Updated conversation turn \{turn_id\} with speech analysis")` | L952 |
+| `.\database.py` | `print(f"Error updating conversation turn with speech analysis: \{e\}")` | L956 |
+| `.\database.py` | `print(f"Saved \{len(response.data)\} response options for turn \{conversation_turn_id\}")` | L993 |
+| `.\database.py` | `print(f"Error saving response options: \{e\}")` | L997 |
+| `.\database.py` | `print(f"Error getting response options for turn: \{e\}")` | L1025 |
+| `.\database.py` | `print(f"Saved vocabulary word '\{word\}' for turn \{conversation_turn_id\}")` | L1063 |
+| `.\orchestrator_agent.py` | `print(f"\nOrchestrator: \{response.content\}\n")` | L211 |
+| `.\tools\conversation_tools.py` | `print(context["context_summary"])` | L181 |
+| `.\main.py` | `print(f"[OK] Supabase client initialized in main.py")` | L115 |
+| `.\main.py` | `print(f"[ERROR] Failed to initialize Supabase client in main.py: \{e\}")` | L117 |
+| `.\main.py` | `print(f"[DB-CACHE HIT] Retrieved cached query for key: \{cache_key\}")` | L154 |
+| `.\main.py` | `print(f"[DB-CACHE] Expired entry removed for key: \{cache_key\}")` | L160 |
+| `.\main.py` | `print(f"[DB-CACHE] Cached query result for key: \{cache_key\} (expires in \{DB_CACHE_TTL.total_seconds()\}s)")` | L168 |
+| `.\main.py` | `print(f"[DB-CACHE] Cleared \{len(keys_to_remove)\} entries for user \{user_id\}" + (f", topic \{topic\}" if topic else ""))` | L189 |
+| `.\main.py` | `print(f"[DB-QUERY] Executing \{len(tasks)\} database queries in parallel for user \{user_id\}, topic \{topic\}...")` | L298 |
+| `.\main.py` | `print(f"[DB-QUERY] Error in \{query_type\} query: \{result\}")` | L306 |
+| `.\main.py` | `print(f"[DB-QUERY] All queries retrieved from cache for user \{user_id\}, topic \{topic\}")` | L322 |
+| `.\main.py` | `print(f"[FIRST-Q CACHE] Cached first question for key: \{cache_key\} (expires in 30 minutes)")` | L342 |
+| `.\main.py` | `print(f"[FIRST-Q CACHE HIT] Retrieved pre-generated first question for key: \{cache_key\}")` | L352 |
+| `.\main.py` | `print(f"[FIRST-Q CACHE] Expired entry removed for key: \{cache_key\}")` | L358 |
+| `.\main.py` | `print(f"[CACHE] Cached question for key: \{cache_key\} (expires in 5 minutes)")` | L366 |
+| `.\main.py` | `print(f"[CACHE HIT] Retrieved pre-generated question for key: \{cache_key\}")` | L378 |
+| `.\main.py` | `print(f"[CACHE] Expired entry removed for key: \{cache_key\}")` | L384 |
+| `.\main.py` | `print(f"[CACHE] Cleared \{len(keys_to_remove)\} entries for user \{user_id\}" + (f", topic \{topic\}" if topic else ""))` | L406 |
+| `.\main.py` | `print(f"[CACHE] Cleaned up \{len(expired_keys)\} expired entries")` | L418 |
+| `.\main.py` | `print(f"[OK] Found .env file at: \{env_path\}")` | L440 |
+| `.\main.py` | `print(f"  File content preview: \{content[:50]\}...")` | L447 |
+| `.\main.py` | `print(f"[OK] OPENAI_API_KEY loaded successfully (length: \{len(api_key)\})")` | L483 |
+| `.\main.py` | `print(f"  Key starts with: \{api_key[:7]\}...")` | L484 |
+| `.\main.py` | `print(f"Returning user '\{username\}' (ID: \{user_id\}) - last topic: \{last_topic\}")` | L739 |
+| `.\main.py` | `print(f"Created session: \{session_id\}")` | L749 |
+| `.\main.py` | `print(f"[LOGIN] Cleaned up \{len(stale_keys)\} stale pre-generation tasks")` | L758 |
+| `.\main.py` | `print(f"[LOGIN] Triggered background pre-generation of first questions for all topics")` | L764 |
+| `.\main.py` | `print(f"[LOGIN] Warning: Failed to trigger pre-generation: \{e\}")` | L766 |
+| `.\main.py` | `print(f"User logged out: \{user_id\} (Session: \{session_id\}) at \{ended_at\}")` | L828 |
+| `.\main.py` | `print(f"Warning: No response options found for turn \{turn_id\}, returning empty list")` | L885 |
+| `.\main.py` | `print(f"Error getting previous topic state: \{e\}")` | L897 |
+| `.\main.py` | `print(f"[STATUS] Pre-generation ready for key: \{cache_key\}")` | L916 |
+| `.\main.py` | `print(f"[STATUS] Pre-generation expired for key: \{cache_key\}")` | L926 |
+| `.\main.py` | `print(f"[STATUS] Pre-generation not ready for key: \{cache_key\}")` | L928 |
+| `.\main.py` | `print(f"[STATUS] Error checking pre-generation status: \{e\}")` | L934 |
+| `.\main.py` | `print(f"Warning: Error checking first question in database: \{e\}. Defaulting to first question.")` | L1001 |
+| `.\main.py` | `print(f"[CACHE WAIT] Pre-generation in progress for topic: \{topic\}, waiting...")` | L1015 |
+| `.\main.py` | `print(f"[CACHE WAIT] Pre-generation completed, using cached question")` | L1020 |
+| `.\main.py` | `print(f"[CACHE WAIT] Timeout waiting for pre-generation, falling back to normal generation")` | L1022 |
+| `.\main.py` | `print(f"[CACHE WAIT] Error waiting for pre-generation: \{e\}, falling back to normal generation")` | L1025 |
+| `.\main.py` | `print(f"[CACHE HIT] Using pre-generated first question for topic: \{topic\}")` | L1029 |
+| `.\main.py` | `print(f"Created conversation turn \{turn_number\} (ID: \{turn_id\}) for topic \{topic\} (from cache)")` | L1059 |
+| `.\main.py` | `print(f"Retrieved \{len(conversation_history)\} conversation turns, \{len(dimension_history)\} dimensions, and \{len(speech_metrics)\} speech metrics for user \{user_id\}, topic \{topic\}")` | L1085 |
+| `.\main.py` | `print(f"Speech trends: clarity=\{speech_trends['clarity_trend']\}, pace=\{speech_trends['pace_trend']\}, confidence=\{speech_trends['confidence_level']\}")` | L1087 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] First question for user \{user_id\} on topic \{topic\} (skipping history for speed)")` | L1102 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Same dimension '\{last_two[0]\}' used 2 times in a row - forcing switch")` | L1139 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Continuing conversation for user \{user_id\} on topic \{topic\}")` | L1149 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Calling orchestrator for topic: \{topic\}, user: \{user_id\}")` | L1176 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Received response (length: \{len(orchestrator_response.content)\} chars)")` | L1194 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response preview: \{orchestrator_response.content[:200]\}...")` | L1195 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Rate limit hit, retrying in \{wait_time\}s (attempt \{attempt + 1\}/\{max_retries\})...")` | L1204 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Dimension '\{dimension\}' not in standard list. Allowing flexibility.")` | L1272 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Dimension '\{dimension\}' validated against standard list.")` | L1274 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== DECISION LOG =====")` | L1277 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Topic: \{topic\}")` | L1278 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Is First Question: \{is_first_question\}")` | L1279 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Chosen Dimension: \{dimension\}")` | L1280 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Chosen Difficulty Level: \{orchestrator_difficulty\}")` | L1281 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Requested Difficulty Level: \{request.difficulty_level\}")` | L1282 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Reasoning: \{reasoning\}")` | L1284 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Reasoning field missing (optional but preferred)")` | L1286 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Generated Question: \{question_text\}")` | L1287 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L1288 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Using orchestrator's difficulty level \{orchestrator_difficulty\} instead of requested \{request.difficulty_level\}")` | L1293 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L1297 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response: \{orchestrator_response.content if orchestrator_response else 'No response'\}")` | L1298 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Full error detail: \{error_detail\}")` | L1300 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L1307 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response: \{orchestrator_response.content if orchestrator_response else 'No response'\}")` | L1308 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Full error detail: \{error_detail\}")` | L1310 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L1317 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Full error detail: \{error_detail\}")` | L1321 |
+| `.\main.py` | `print(f"Warning: Failed to get/create session_topic for session \{request.session_id\}, topic \{topic\}")` | L1339 |
+| `.\main.py` | `print(f"Created conversation turn \{turn_number\} (ID: \{turn_id\}) for topic \{topic\}")` | L1359 |
+| `.\main.py` | `print(f"Warning: Failed to create conversation_turn for session_topic \{session_topic_id\}")` | L1361 |
+| `.\main.py` | `print(f"Generated audio for question (\{len(audio_base64)\} characters base64)")` | L1380 |
+| `.\main.py` | `print(f"Warning: Failed to generate audio for question: \{e\}")` | L1382 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Starting pre-generation for topic: \{topic\}, user: \{user_id\}")` | L1408 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Already cached for topic: \{topic\}")` | L1413 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Same task detected for topic: \{topic\}, continuing...")` | L1424 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Found stale completed task for topic: \{topic\}, cleaning up...")` | L1427 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Task already in progress for topic: \{topic\}, skipping wait and generating fresh...")` | L1432 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Rate limit hit for topic: \{topic\}, retrying in \{wait_time\}s (attempt \{attempt + 1\}/\{max_retries\})...")` | L1477 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Rate limit error after \{max_retries\} attempts for topic: \{topic\}")` | L1481 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Error calling orchestrator for topic: \{topic\}: \{e\}")` | L1485 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Orchestrator returned empty response for topic: \{topic\}")` | L1489 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] No JSON found in orchestrator response for topic: \{topic\}")` | L1501 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Unclosed JSON in orchestrator response for topic: \{topic\}")` | L1516 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Missing required fields for topic: \{topic\}")` | L1531 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Generated audio for topic: \{topic\} (\{len(audio_base64)\} characters base64)")` | L1544 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Warning: Failed to generate audio for topic \{topic\}: \{e\}")` | L1546 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Successfully pre-generated and cached first question for topic: \{topic\}")` | L1559 |
+| `.\main.py` | `print(f"[PRE-GEN FIRST-Q] Error pre-generating first question for topic \{topic\}: \{e\}")` | L1569 |
+| `.\main.py` | `print(f"[PRE-GEN ALL] Starting pre-generation for all topics for user: \{user_id\}")` | L1588 |
+| `.\main.py` | `print(f"[PRE-GEN ALL] Error pre-generating topic \{topic\}: \{e\}")` | L1607 |
+| `.\main.py` | `print(f"[PRE-GEN ALL] Completed: \{successful\} successful, \{failed\} failed for user: \{user_id\}")` | L1610 |
+| `.\main.py` | `print(f"[PRE-GEN] Starting pre-generation for user \{user_id\}, topic \{topic\}")` | L1626 |
+| `.\main.py` | `print(f"[PRE-GEN] Retrieved \{len(conversation_history)\} conversation turns, \{len(dimension_history)\} dimensions, and \{len(speech_metrics)\} speech metrics")` | L1636 |
+| `.\main.py` | `print(f"[PRE-GEN] Warning: Error retrieving history: \{e\}")` | L1638 |
+| `.\main.py` | `print(f"[PRE-GEN] WARNING: Same dimension '\{last_two[0]\}' used 2 times in a row - forcing switch")` | L1663 |
+| `.\main.py` | `print(f"[PRE-GEN] Error building context JSON: \{e\}")` | L1702 |
+| `.\main.py` | `print(f"[PRE-GEN] Orchestrator response received (length: \{len(orchestrator_response.content)\} chars)")` | L1739 |
+| `.\main.py` | `print(f"[PRE-GEN] Rate limit hit, retrying in \{wait_time\}s (attempt \{attempt + 1\}/\{max_retries\})...")` | L1747 |
+| `.\main.py` | `print(f"[PRE-GEN] Rate limit error after \{max_retries\} attempts, skipping pre-generation")` | L1751 |
+| `.\main.py` | `print(f"[PRE-GEN] Error calling orchestrator: \{e\}")` | L1755 |
+| `.\main.py` | `print(f"[PRE-GEN] Generated audio for question (\{len(audio_base64)\} characters base64)")` | L1844 |
+| `.\main.py` | `print(f"[PRE-GEN] Warning: Failed to generate audio: \{e\}")` | L1846 |
+| `.\main.py` | `print(f"[PRE-GEN] ===== PRE-GENERATION SUCCESS =====")` | L1864 |
+| `.\main.py` | `print(f"[PRE-GEN] Cache Key: \{cache_key\}")` | L1865 |
+| `.\main.py` | `print(f"[PRE-GEN] Question: \{formatted_question[:100]\}...")` | L1866 |
+| `.\main.py` | `print(f"[PRE-GEN] Dimension: \{dimension\}")` | L1867 |
+| `.\main.py` | `print(f"[PRE-GEN] Difficulty: \{final_difficulty\}")` | L1868 |
+| `.\main.py` | `print(f"[PRE-GEN] Audio Generated: \{audio_base64 is not None\}")` | L1869 |
+| `.\main.py` | `print(f"[PRE-GEN] Current cache size: \{len(question_cache)\} entries")` | L1870 |
+| `.\main.py` | `print(f"[PRE-GEN] ==================================")` | L1871 |
+| `.\main.py` | `print(f"[PRE-GEN] Error pre-generating question: \{e\}")` | L1874 |
+| `.\main.py` | `print(f"[PRE-GEN] Fatal error in pre-generation: \{e\}")` | L1880 |
+| `.\main.py` | `print(f"[CONTINUE] Checking cache for user_id=\{request.user_id\}, topic=\{request.topic\}, previous_turn_id=\{request.previous_turn_id\}")` | L1896 |
+| `.\main.py` | `print(f"[CONTINUE] Cache key: \{cache_key\}")` | L1899 |
+| `.\main.py` | `print(f"[CONTINUE] Current cache entries: \{list(question_cache.keys())\}")` | L1900 |
+| `.\main.py` | `print(f"[CACHE HIT] Returning pre-generated question for user \{request.user_id\}, topic \{request.topic\}")` | L1904 |
+| `.\main.py` | `print(f"[CACHE HIT] Created turn \{turn_number\} (ID: \{turn_id\}) for cached question")` | L1929 |
+| `.\main.py` | `print(f"[CACHE HIT] Warning: Error creating turn for cached question: \{e\}")` | L1931 |
+| `.\main.py` | `print(f"[CACHE MISS] No pre-generated question found for key: \{cache_key\}, generating on-demand")` | L1942 |
+| `.\main.py` | `print(f"Updated previous turn \{request.previous_turn_id\} with user response")` | L1957 |
+| `.\main.py` | `print(f"Warning: Failed to update previous turn \{request.previous_turn_id\}")` | L1959 |
+| `.\main.py` | `print(f"Warning: Error updating previous turn: \{e\}")` | L1961 |
+| `.\main.py` | `print(f"Retrieved \{len(conversation_history)\} conversation turns, \{len(dimension_history)\} dimensions, and \{len(speech_metrics)\} speech metrics for user \{user_id\}, topic \{request.topic\}")` | L1982 |
+| `.\main.py` | `print(f"Speech trends: clarity=\{speech_trends['clarity_trend']\}, pace=\{speech_trends['pace_trend']\}, confidence=\{speech_trends['confidence_level']\}")` | L1984 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Calling orchestrator for continue conversation - topic: \{request.topic\}")` | L2017 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Error building context JSON: \{e\}")` | L2042 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Same dimension '\{last_two[0]\}' used 2 times in a row - forcing switch")` | L2054 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Received response (length: \{len(orchestrator_response.content)\} chars)")` | L2087 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response preview: \{orchestrator_response.content[:200]\}...")` | L2088 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Rate limit hit, retrying in \{wait_time\}s (attempt \{attempt + 1\}/\{max_retries\})...")` | L2096 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Dimension '\{dimension\}' not in standard list. Allowing flexibility.")` | L2162 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Dimension '\{dimension\}' validated against standard list.")` | L2164 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")` | L2167 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Topic: \{request.topic\}")` | L2168 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] User Response: \{request.user_response[:100]\}...")` | L2169 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Engagement Level: \{engagement_level\} (\{response_length\} words)")` | L2170 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Dimension History: \{dimension_history[:5] if dimension_history else 'None'\}")` | L2171 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Speech Performance:")` | L2173 |
+| `.\main.py` | `print(f"[ORCHESTRATOR]   - Clarity Trend: \{speech_trends['clarity_trend']\}")` | L2174 |
+| `.\main.py` | `print(f"[ORCHESTRATOR]   - Average Clarity: \{speech_trends['average_clarity']\}")` | L2175 |
+| `.\main.py` | `print(f"[ORCHESTRATOR]   - Confidence Level: \{speech_trends['confidence_level']\}")` | L2176 |
+| `.\main.py` | `print(f"[ORCHESTRATOR]   - Recent Clarity: \{speech_trends['recent_clarity']\}")` | L2177 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Speech Performance: No data available")` | L2179 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Chosen Dimension: \{dimension\}")` | L2180 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Chosen Difficulty Level: \{orchestrator_difficulty\}")` | L2181 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Requested Difficulty Level: \{request.difficulty_level\}")` | L2182 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Reasoning: \{reasoning\}")` | L2184 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] WARNING: Reasoning field missing (optional but preferred)")` | L2186 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Generated Question: \{question_text[:200]\}...")` | L2187 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L2188 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Using orchestrator's difficulty level \{orchestrator_difficulty\} instead of requested \{request.difficulty_level\}")` | L2193 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L2197 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response: \{orchestrator_response.content if orchestrator_response else 'No response'\}")` | L2198 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Full error detail: \{error_detail\}")` | L2200 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L2207 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] Raw response: \{orchestrator_response.content if orchestrator_response else 'No response'\}")` | L2208 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ERROR: \{error_msg\}")` | L2216 |
+| `.\main.py` | `print(f"[DEBUG] After formatting, formatted_question length: \{len(formatted_question)\} characters")` | L2257 |
+| `.\main.py` | `print(f"[DEBUG] After formatting, formatted_question: \{repr(formatted_question[:200])\}...")` | L2258 |
+| `.\main.py` | `print(f"Generated follow-up question: \{formatted_question[:200]\}...")` | L2259 |
+| `.\main.py` | `print(f"Generated audio for follow-up question (\{len(audio)\} characters base64)")` | L2278 |
+| `.\main.py` | `print(f"Warning: Failed to generate audio for follow-up question: \{e\}")` | L2281 |
+| `.\main.py` | `print(f"Warning: Failed to get/create session_topic for session \{request.session_id\}, topic \{request.topic\}")` | L2292 |
+| `.\main.py` | `print(f"Created follow-up conversation turn \{turn_number\} (ID: \{turn_id\}) for topic \{request.topic\}")` | L2313 |
+| `.\main.py` | `print(f"Warning: Failed to create conversation_turn for session_topic \{session_topic_id\}")` | L2316 |
+| `.\main.py` | `print(f"Warning: Previous turn update task failed: \{e\}")` | L2336 |
+| `.\main.py` | `print(f"Warning: Failed to parse response agent output: \{e\}")` | L2402 |
+| `.\main.py` | `print(f"Saved \{len(saved_options)\} response options for turn \{request.turn_id\}")` | L2469 |
+| `.\main.py` | `print(f"Warning: Failed to save response options for turn \{request.turn_id\}")` | L2471 |
+| `.\main.py` | `print(f"Saved vocabulary word '\{vocab_data['word']\}' for turn \{request.turn_id\}")` | L2482 |
+| `.\main.py` | `print(f"Warning: Failed to save vocabulary word for turn \{request.turn_id\}")` | L2484 |
+| `.\main.py` | `print(f"Warning: No turn_id provided, skipping database save")` | L2486 |
+| `.\main.py` | `print(f"Saved speech analysis for turn \{turn_id\}")` | L2728 |
+| `.\main.py` | `print(f"Warning: Failed to save speech analysis for turn \{turn_id\}")` | L2730 |
+| `.\main.py` | `print(f"Warning: No turn_id provided, skipping speech analysis database save")` | L2737 |
+| `.\main.py` | `print(f"[PRE-GEN] Checking if pre-generation should be triggered...")` | L2742 |
+| `.\main.py` | `print(f"[PRE-GEN] turn_id: \{turn_id\}, transcript: \{analysis_data.get('transcript', '')[:50] if analysis_data.get('transcript') else 'None'\}...")` | L2743 |
+| `.\main.py` | `print(f"[PRE-GEN] ===== TRIGGERING PRE-GENERATION =====")` | L2787 |
+
+
+</details>
+</tool-use>
 
 ---
 
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "SESSION LOG|session_log|=====.*SESSION|TURN LOG|===.*TURN|conversation.*log" in "C:\dev\convobridge2\backend\main.py" • 2 matches</summary>
 
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\orchestrator_agent.py` | `"     - Natural conversation flow (what would logically come next)",` | L103 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")` | L2167 |
+
+
+</details>
+</tool-use>
 
 ---
 
-
-
----
-
-
+Now let me find the DECISION LOG block and the continue conversation endpoint — that's where I need to add user response logging:
 
 ---
 
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
 
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+Now let me find the conversation turn logging that happens when a user submits a response (the `/api/analyze_speech` or `/api/continue_conversation` endpoint), and also check what "session log" refers to — whether it's file-based or just stdout:
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "session.*log|log.*session|SESSION_LOG|session_log_file|open.*log|\.log" in "C:\dev\convobridge2\backend" • 3 matches</summary>
+
+Output mode: files_with_matches
+
+
+| File |
+|------|
+| `.\main.py` |
+| `.\database_schema.sql` |
+| `.\DATABASE_SCHEMA.md` |
+
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "SESSION LOG|TURN LOG|===.*LOG|LOG.*===|print.*\[SESSION|print.*\[TURN" in "C:\dev\convobridge2\backend\main.py" • 4 matches</summary>
+
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== DECISION LOG =====")` | L1277 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L1288 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")` | L2167 |
+| `.\main.py` | `print(f"[ORCHESTRATOR] ===== END DECISION LOG =====")` | L2188 |
+
+
+</details>
+</tool-use>
+
+---
+
+Now I have the full picture. The "logging" is the DECISION LOG printed to console/stdout in the orchestrator blocks. The continue conversation log at line 2167 already logs `User Response` (line 2169), but only the first 100 chars. The **first question** DECISION LOG (line 1277) never has a user response (it's the opening question). 
+
+The key places to add user response logging are:
+1. **`/api/continue_conversation`** — when a user response comes in before the next question is generated (already has it in the DECISION LOG, but I should also add a dedicated turn log block)
+2. **`/api/analyze_speech`** — when a speech transcript is submitted
+
+Let me check the analyze_speech endpoint and also look at where the first-question log happens vs continue-conversation, to add a proper SESSION TURN LOG:
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+Now let me read the `process-audio` endpoint where the transcript comes back and the turn gets logged:
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+Now I have a thorough understanding. The logging is all `print()` to stdout. The user asks to log user responses in the "logging sessions" — meaning add them to the existing `[ORCHESTRATOR] DECISION LOG` and `[CONTINUE CONVERSATION DECISION LOG]` blocks clearly, and also log them when they come in at the `process-audio` and `continue_conversation` entry points.
+
+Let me add a clear **`[SESSION TURN]`** log block at the two key points:
+1. In `continue_conversation` — when a user response is received (start of function)
+2. In `process-audio` — when the transcript is finalized (already has `[PRE-GEN]` blocks, add a `[SESSION TURN]` log)
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: C:\dev\convobridge2\backend\main.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+Now I'll add the session turn logging. There are two insertion points:
+
+1. **`/api/continue_conversation`** — right after the validation check, log the incoming user response
+2. **`/api/process-audio`** — right after the transcript is confirmed (after line 2739 `"Audio processed successfully"`)
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: C:\dev\convobridge2\backend\main.py</summary>
+
+**Chunk 1**
+Lines added: 11, lines removed: undefined
+
+```diff
+@@ -1893,4 +1893,15 @@
+              raise HTTPException(status_code=400, detail="user_response is required for follow-up questions")
+          
++         # Log incoming user response for context drift / relevancy testing
++         print(f"[SESSION TURN] ===== USER RESPONSE RECEIVED =====")
++         print(f"[SESSION TURN] User ID:           {request.user_id}")
++         print(f"[SESSION TURN] Session ID:        {request.session_id}")
++         print(f"[SESSION TURN] Topic:             {request.topic}")
++         print(f"[SESSION TURN] Previous Turn ID:  {request.previous_turn_id}")
++         print(f"[SESSION TURN] Previous Question: {(request.previous_question or 'N/A')[:200]}")
++         print(f"[SESSION TURN] User Response:     {request.user_response}")
++         print(f"[SESSION TURN] Word Count:        {len(request.user_response.split())}")
++         print(f"[SESSION TURN] ============================================")
++ 
+          # Check cache for pre-generated question first
+          print(f"[CONTINUE] Checking cache for user_id={request.user_id}, topic={request.topic}, previous_turn_id={request.previous_turn_id}")
+```
+
+</details>
+
+</tool-use>
+
+---
+
+Now add the session turn log in `process-audio` after the transcript is confirmed and saved:
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: C:\dev\convobridge2\backend\main.py</summary>
+
+**Chunk 1**
+Lines added: 11, lines removed: 1
+
+```diff
+@@ -2749,5 +2749,15 @@
+              
+              print(f"Audio processed successfully, file size: {file_size} bytes")
+-             
++ 
++             # Log the transcribed user response for context drift / relevancy testing
++             print(f"[SESSION TURN] ===== SPEECH RESPONSE TRANSCRIBED =====")
++             print(f"[SESSION TURN] Turn ID:       {turn_id or 'N/A'}")
++             print(f"[SESSION TURN] Transcript:    {analysis_data['transcript']}")
++             print(f"[SESSION TURN] Clarity Score: {analysis_data['clarity_score']}")
++             print(f"[SESSION TURN] Pace (WPM):    {analysis_data['pace_wpm']}")
++             print(f"[SESSION TURN] Filler Words:  {analysis_data['filler_words']}")
++             print(f"[SESSION TURN] Feedback:      {analysis_data['feedback']}")
++             print(f"[SESSION TURN] ================================================")
++ 
+              # Trigger background pre-generation of next question if we have all required info
+              print(f"[PRE-GEN] Checking if pre-generation should be triggered...")
+```
+
+</details>
+
+</tool-use>
+
+---
+
+Now also enhance the existing `[ORCHESTRATOR] CONTINUE CONVERSATION DECISION LOG` to show the **full** user response (it was truncated to 100 chars before):
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: C:\dev\convobridge2\backend\main.py</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: 1
+
+```diff
+@@ -2178,5 +2178,5 @@
+              print(f"[ORCHESTRATOR] ===== CONTINUE CONVERSATION DECISION LOG =====")
+              print(f"[ORCHESTRATOR] Topic: {request.topic}")
+-             print(f"[ORCHESTRATOR] User Response: {request.user_response[:100]}...")
++             print(f"[ORCHESTRATOR] User Response: {request.user_response}")
+              print(f"[ORCHESTRATOR] Engagement Level: {engagement_level} ({response_length} words)")
+              print(f"[ORCHESTRATOR] Dimension History: {dimension_history[:5] if dimension_history else 'None'}")
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="generic" data-tool-name="read_lints">
+<details>
+          <summary>Tool use: **read_lints** • Read lints for 1 file</summary>
+      
+Lint paths:
+
+- `C:\dev\convobridge2\backend\main.py`
+
+Lint results
+
+
+**No lint errors found**
+</details>
+</tool-use>
+
+---
+
+No errors. Let me verify the three changes look correct in context:
+
+---
+
+<tool-use data-tool-type="search" data-tool-name="grep">
+<details>
+<summary>Tool use: **grep** • Grep for "SESSION TURN" in "C:\dev\convobridge2\backend\main.py" • 17 matches</summary>
+
+Output mode: content
+
+
+| File | Content | Line |
+|------|------|------|
+| `.\main.py` | `print(f"[SESSION TURN] ===== USER RESPONSE RECEIVED =====")` | L1896 |
+| `.\main.py` | `print(f"[SESSION TURN] User ID:           \{request.user_id\}")` | L1897 |
+| `.\main.py` | `print(f"[SESSION TURN] Session ID:        \{request.session_id\}")` | L1898 |
+| `.\main.py` | `print(f"[SESSION TURN] Topic:             \{request.topic\}")` | L1899 |
+| `.\main.py` | `print(f"[SESSION TURN] Previous Turn ID:  \{request.previous_turn_id\}")` | L1900 |
+| `.\main.py` | `print(f"[SESSION TURN] Previous Question: \{(request.previous_question or 'N/A')[:200]\}")` | L1901 |
+| `.\main.py` | `print(f"[SESSION TURN] User Response:     \{request.user_response\}")` | L1902 |
+| `.\main.py` | `print(f"[SESSION TURN] Word Count:        \{len(request.user_response.split())\}")` | L1903 |
+| `.\main.py` | `print(f"[SESSION TURN] ============================================")` | L1904 |
+| `.\main.py` | `print(f"[SESSION TURN] ===== SPEECH RESPONSE TRANSCRIBED =====")` | L2753 |
+| `.\main.py` | `print(f"[SESSION TURN] Turn ID:       \{turn_id or 'N/A'\}")` | L2754 |
+| `.\main.py` | `print(f"[SESSION TURN] Transcript:    \{analysis_data['transcript']\}")` | L2755 |
+| `.\main.py` | `print(f"[SESSION TURN] Clarity Score: \{analysis_data['clarity_score']\}")` | L2756 |
+| `.\main.py` | `print(f"[SESSION TURN] Pace (WPM):    \{analysis_data['pace_wpm']\}")` | L2757 |
+| `.\main.py` | `print(f"[SESSION TURN] Filler Words:  \{analysis_data['filler_words']\}")` | L2758 |
+| `.\main.py` | `print(f"[SESSION TURN] Feedback:      \{analysis_data['feedback']\}")` | L2759 |
+| `.\main.py` | `print(f"[SESSION TURN] ================================================")` | L2760 |
+
+
+</details>
+</tool-use>
+
+---
+
+All three changes are in place. Here's a summary of what was added to `backend/main.py`:
+
+---
+
+### Changes Made
+
+**1. `/api/continue_conversation` — `[SESSION TURN] USER RESPONSE RECEIVED`** (line 1896)
+
+Logged at the very start of the endpoint, before cache/generation logic. Captures:
+- User ID, Session ID, Topic
+- Previous Turn ID + Previous Question (up to 200 chars)
+- **Full user response text** (no truncation)
+- Word count (for engagement tracking)
+
+**2. `/api/process-audio` — `[SESSION TURN] SPEECH RESPONSE TRANSCRIBED`** (line 2753)
+
+Logged right after speech analysis completes, capturing:
+- Turn ID
+- **Full transcript** of what the user said
+- Clarity score, Pace (WPM), Filler words
+- Feedback generated
+
+**3. `[ORCHESTRATOR] CONTINUE CONVERSATION DECISION LOG`** — removed the `[:100]` truncation so the full user response is now shown there too.
+
+Now in the backend logs you'll see a clear `[SESSION TURN]` block for every user response, making it easy to trace the full conversation flow and spot any context drifting or relevancy issues turn-by-turn.
 
 ---
 
