@@ -2691,15 +2691,72 @@ async def process_audio(
         
         # Use analyze_speech_with_audio function
         # temp_file_path now points to the correct file (converted if needed, original otherwise)
-        analysis_result = await loop.run_in_executor(
-            None,
-            analyze_speech_with_audio,
-            speech_analysis_agent,
-            None,  # audio_data
-            temp_file_path,  # audio_filepath (use temp_file_path which may be converted)
-            audio_format,
-            expected_response
-        )
+        try:
+            analysis_result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    analyze_speech_with_audio,
+                    speech_analysis_agent,
+                    None,  # audio_data
+                    temp_file_path,  # audio_filepath (use temp_file_path which may be converted)
+                    audio_format,
+                    expected_response
+                ),
+                timeout=120.0  # 2 minute timeout for transcription + analysis
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Audio processing timed out. The OpenAI API request took too long. Please try again."
+            )
+        except RuntimeError as e:
+            error_str = str(e)
+            # Check if the error is a timeout or API connection error
+            if "timed out" in error_str.lower() or "timeout" in error_str.lower():
+                raise HTTPException(
+                    status_code=504,
+                    detail="Audio transcription timed out. Please try recording again."
+                )
+            elif "api connection error" in error_str.lower() or "connection" in error_str.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Unable to connect to the transcription service. Please try again."
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error processing audio: {error_str}"
+                )
+        except Exception as e:
+            error_str = str(e)
+            # Check if error message looks like it was returned as a transcript
+            if "timed out" in error_str.lower() and len(error_str) < 100:
+                raise HTTPException(
+                    status_code=504,
+                    detail="Audio transcription timed out. Please try recording again."
+                )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing audio: {error_str}"
+            )
+        
+        # Validate that the result is not an error message
+        if not analysis_result or len(analysis_result.strip()) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Audio processing returned empty result. Please try again."
+            )
+        
+        # Check if the result looks like an error message instead of JSON
+        analysis_result_lower = analysis_result.lower().strip()
+        if any(error_indicator in analysis_result_lower for error_indicator in [
+            "timed out", "timeout", "error", "failed", "connection error", 
+            "api connection error", "request timed out"
+        ]) and "{" not in analysis_result:
+            raise HTTPException(
+                status_code=504,
+                detail="Audio transcription timed out. Please try recording again."
+            )
         
         # Parse the JSON response
         try:

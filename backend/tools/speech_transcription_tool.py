@@ -62,13 +62,37 @@ def transcribe_audio(
         if not response or not response.content:
             raise ValueError("Transcription agent returned empty response")
         
-        return response.content.strip()
+        transcript = response.content.strip()
+        
+        # Validate that the transcript is not an error message
+        transcript_lower = transcript.lower()
+        error_indicators = [
+            "timed out", "timeout", "error", "failed", "connection error",
+            "api connection error", "request timed out", "openai api"
+        ]
+        
+        if any(indicator in transcript_lower for indicator in error_indicators):
+            # This looks like an error message, not a transcript
+            raise RuntimeError(f"Transcription returned error message instead of transcript: {transcript}")
+        
+        return transcript
+    except RuntimeError:
+        # Re-raise RuntimeError as-is (these are our custom errors)
+        raise
     except Exception as e:
-        error_msg = f"Error transcribing audio: {str(e)}"
-        print(error_msg)
+        error_str = str(e)
+        error_msg = f"Error transcribing audio: {error_str}"
+        print(f"ERROR    {error_msg}")
         import traceback
         traceback.print_exc()
-        raise RuntimeError(error_msg) from e
+        
+        # Check if it's a timeout error
+        if "timed out" in error_str.lower() or "timeout" in error_str.lower():
+            raise RuntimeError("Transcription timed out. Please try again.") from e
+        elif "connection" in error_str.lower() or "api" in error_str.lower():
+            raise RuntimeError("Unable to connect to transcription service. Please try again.") from e
+        else:
+            raise RuntimeError(error_msg) from e
 
 if __name__ == "__main__":
     # Simple test

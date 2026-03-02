@@ -36,6 +36,11 @@ export default function LoginPage() {
           alert('Warning: Session ID not created. This may be because Supabase is not configured. Please check your backend configuration.');
         }
         
+        // Store login timestamp in localStorage for session info
+        if (loginData.login_timestamp) {
+          localStorage.setItem('login_timestamp', loginData.login_timestamp);
+        }
+        
         // Pass the username, user_id, session_id, and returning user info via query parameters
         const params = new URLSearchParams({
           user: name.trim(),

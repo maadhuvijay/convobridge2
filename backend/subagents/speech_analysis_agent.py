@@ -147,13 +147,38 @@ def analyze_speech_with_audio(
         response = agent.run(prompt)
         if not response or not response.content:
             raise ValueError("Speech analysis agent returned empty response")
-        return response.content.strip()
+        
+        analysis_result = response.content.strip()
+        
+        # Validate that the result is not an error message
+        analysis_lower = analysis_result.lower()
+        error_indicators = [
+            "timed out", "timeout", "error", "failed", "connection error",
+            "api connection error", "request timed out", "openai api"
+        ]
+        
+        if any(indicator in analysis_lower for indicator in error_indicators) and "{" not in analysis_result:
+            # This looks like an error message, not JSON
+            raise RuntimeError(f"Speech analysis returned error message instead of analysis: {analysis_result}")
+        
+        return analysis_result
+    except RuntimeError:
+        # Re-raise RuntimeError as-is (these are our custom errors)
+        raise
     except Exception as e:
-        error_msg = f"Error running speech analysis: {str(e)}"
-        print(error_msg)
+        error_str = str(e)
+        error_msg = f"Error running speech analysis: {error_str}"
+        print(f"ERROR    {error_msg}")
         import traceback
         traceback.print_exc()
-        raise RuntimeError(error_msg) from e
+        
+        # Check if it's a timeout error
+        if "timed out" in error_str.lower() or "timeout" in error_str.lower():
+            raise RuntimeError("Speech analysis timed out. Please try again.") from e
+        elif "connection" in error_str.lower() or "api" in error_str.lower():
+            raise RuntimeError("Unable to connect to analysis service. Please try again.") from e
+        else:
+            raise RuntimeError(error_msg) from e
 
 # Create the speech analysis agent instance
 speech_analysis_agent = create_speech_analysis_agent()
